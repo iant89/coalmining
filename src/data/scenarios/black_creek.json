@@ -1,0 +1,114 @@
+{
+  "id": "black_creek_inheritance",
+  "name": "The Inheritance",
+  "mineName": "Black Creek Mine",
+  "description": "Your grandfather's small surface mine on the Black Creek seam. Old machines, eight loyal hands, two permits about to need attention and a seam he swore runs shallow along the east ridge.",
+  "seed": 1947,
+  "startHour": 6,
+  "map": { "cols": 96, "rows": 96, "cellSize": 4, "baseElevation": 300, "relief": 7, "reliefScale": 120, "slopeX": -0.025 },
+  "geology": {
+    "outcropX": 152,
+    "outcropDepth": 1.4,
+    "dipPerMetre": 0.095,
+    "thicknessMin": 1.6,
+    "thicknessMax": 3.0,
+    "topsoilMin": 0.35,
+    "topsoilMax": 0.8,
+    "ashBase": 7.5,
+    "sulfurBase": 0.8,
+    "btuBase": 12150
+  },
+  "legacySamples": [
+    { "x": 132, "z": -18, "error": 0.8, "reliability": 0.45, "note": "Grandpa's 1978 auger hole" },
+    { "x": 104, "z": 36, "error": 1.4, "reliability": 0.35, "note": "Old prospect pit" }
+  ],
+  "shift": { "startHour": 6, "lengthHours": 12, "blastStartHour": 8, "blastEndHour": 17 },
+  "cash": 750000,
+  "debt": 0,
+  "creditLimit": 250000,
+  "fuelPricePerL": 1.18,
+  "overheadPerDay": 7200,
+  "laborBurden": 1.38,
+  "parcels": [
+    {
+      "id": "parcel-home",
+      "name": "Hollis Home Place",
+      "area": { "x0": -192, "z0": -192, "x1": 192, "z1": 192 },
+      "surfaceOwner": "Hollis family (you)",
+      "mineralOwner": "Caudill Heirs",
+      "status": "LEASED",
+      "surfaceRights": true,
+      "mineralRights": true,
+      "royalty": 0.06
+    }
+  ],
+  "permits": [
+    { "id": "permit-mining", "type": "SURFACE_MINING", "name": "Surface Mining Permit S-1147", "status": "APPROVED", "approvalDay": -900, "expirationDay": 120, "area": { "x0": 56, "z0": -192, "x1": 192, "z1": 192 }, "conditions": ["Topsoil to be salvaged where practical", "Spoil confined to the permitted east dump"], "renewalCost": 18000, "reviewDays": 21 },
+    { "id": "permit-blasting", "type": "BLASTING", "name": "Blasting Plan B-1147", "status": "APPROVED", "approvalDay": -320, "expirationDay": 45, "area": null, "conditions": ["Blast only between 08:00 and 17:00", "Clear 90 m exclusion zone"], "renewalCost": 6000, "reviewDays": 10 },
+    { "id": "permit-exploration", "type": "EXPLORATION", "name": "Exploration Notice E-22", "status": "APPROVED", "approvalDay": -60, "expirationDay": 300, "area": null, "conditions": [], "renewalCost": 1500, "reviewDays": 5 }
+  ],
+  "roads": {
+    "nodes": [
+      { "id": "n-yard", "x": 4, "z": 126 },
+      { "id": "n-junction", "x": 62, "z": 112 },
+      { "id": "n-rom", "x": 112, "z": 108 },
+      { "id": "n-ramp", "x": 160, "z": 78 },
+      { "id": "n-east", "x": 166, "z": 8 },
+      { "id": "n-north", "x": 166, "z": -78 },
+      { "id": "n-west", "x": -110, "z": 98 }
+    ],
+    "edges": [
+      { "a": "n-yard", "b": "n-junction", "speedLimitKmh": 40, "width": 10, "condition": 78 },
+      { "a": "n-junction", "b": "n-rom", "speedLimitKmh": 40, "width": 12, "condition": 74 },
+      { "a": "n-rom", "b": "n-ramp", "speedLimitKmh": 35, "width": 12, "condition": 66 },
+      { "a": "n-ramp", "b": "n-east", "speedLimitKmh": 35, "width": 12, "condition": 62 },
+      { "a": "n-east", "b": "n-north", "speedLimitKmh": 30, "width": 10, "condition": 58 },
+      { "a": "n-yard", "b": "n-west", "speedLimitKmh": 30, "width": 8, "condition": 70 }
+    ]
+  },
+  "facilities": [
+    { "id": "fac-office", "type": "OFFICE", "name": "Mine office", "x": -26, "z": 150, "width": 16, "depth": 10, "height": 4.5, "rotation": 0 },
+    { "id": "fac-shop", "type": "SHOP", "name": "Maintenance shop", "x": 18, "z": 162, "width": 26, "depth": 16, "height": 9, "rotation": 0 },
+    { "id": "fac-fuel", "type": "FUEL", "name": "Fuel station", "x": 50, "z": 136, "width": 8, "depth": 5, "height": 4, "rotation": 0 },
+    { "id": "fac-parking", "type": "PARKING", "name": "Equipment yard", "x": -10, "z": 108, "width": 54, "depth": 26, "height": 0.2, "rotation": 0 }
+  ],
+  "dumps": [
+    { "id": "dump-east", "name": "East spoil dump", "accepts": "SPOIL", "area": { "x0": 160, "z0": -150, "x1": 192, "z1": -4 }, "maxHeight": 14 },
+    { "id": "dump-topsoil", "name": "Topsoil stockpile", "accepts": "TOPSOIL", "area": { "x0": 172, "z0": 24, "x1": 192, "z1": 64 }, "maxHeight": 5 }
+  ],
+  "stockpiles": [
+    { "id": "rom-1", "name": "ROM coal stockpile", "x": 122, "z": 132, "materialType": "COAL_RAW", "capacityT": 12000 }
+  ],
+  "blocks": [
+    { "id": "A1", "name": "Block A1", "area": { "x0": 120, "z0": -72, "x1": 152, "z1": -40 } },
+    { "id": "A2", "name": "Block A2", "area": { "x0": 120, "z0": -40, "x1": 152, "z1": -8 } },
+    { "id": "A3", "name": "Block A3", "area": { "x0": 120, "z0": -8, "x1": 152, "z1": 24 } },
+    { "id": "A4", "name": "Block A4", "area": { "x0": 120, "z0": 24, "x1": 152, "z1": 56 } },
+    { "id": "B1", "name": "Block B1", "area": { "x0": 88, "z0": -72, "x1": 120, "z1": -40 } },
+    { "id": "B2", "name": "Block B2", "area": { "x0": 88, "z0": -40, "x1": 120, "z1": -8 } },
+    { "id": "B3", "name": "Block B3", "area": { "x0": 88, "z0": -8, "x1": 120, "z1": 24 } },
+    { "id": "B4", "name": "Block B4", "area": { "x0": 88, "z0": 24, "x1": 120, "z1": 56 } }
+  ],
+  "equipment": [
+    { "defId": "hartmann_hx350", "name": "HX350 #1", "x": -30, "z": 104, "heading": 3.14, "condition": 68, "hours": 21400, "hoursSinceService": 140, "fuelPct": 0.72, "operator": "emp-earl" },
+    { "defId": "ridgeline_rh60", "name": "RH60 #1", "x": -14, "z": 104, "heading": 3.14, "condition": 62, "hours": 31050, "hoursSinceService": 210, "fuelPct": 0.55, "operator": "emp-wanda" },
+    { "defId": "ridgeline_rh60", "name": "RH60 #2", "x": -2, "z": 104, "heading": 3.14, "condition": 71, "hours": 26300, "hoursSinceService": 95, "fuelPct": 0.8, "operator": "emp-ray" },
+    { "defId": "penrose_pd45", "name": "PD-45 Drill", "x": 10, "z": 104, "heading": 3.14, "condition": 64, "hours": 17800, "hoursSinceService": 60, "fuelPct": 0.66, "operator": "emp-clyde" },
+    { "defId": "ironback_dz9", "name": "DZ-9 Dozer", "x": 22, "z": 104, "heading": 3.14, "condition": 58, "hours": 28900, "hoursSinceService": 180, "fuelPct": 0.61, "operator": "emp-dale" }
+  ],
+  "workers": [
+    { "id": "emp-earl", "name": "Earl Hatfield", "age": 61, "role": "OPERATOR", "experienceYears": 38, "wagePerHour": 41, "skill": 0.9, "safety": 0.85, "certifications": ["EXCAVATOR", "DOZER", "HAUL_TRUCK"], "note": "Foreman. Ran your grandfather's shovel for thirty years." },
+    { "id": "emp-wanda", "name": "Wanda Slone", "age": 44, "role": "OPERATOR", "experienceYears": 17, "wagePerHour": 34, "skill": 0.75, "safety": 0.8, "certifications": ["HAUL_TRUCK", "EXCAVATOR"] },
+    { "id": "emp-ray", "name": "Ray Combs", "age": 37, "role": "OPERATOR", "experienceYears": 9, "wagePerHour": 31, "skill": 0.62, "safety": 0.65, "certifications": ["HAUL_TRUCK"] },
+    { "id": "emp-dale", "name": "Dale Napier", "age": 52, "role": "OPERATOR", "experienceYears": 24, "wagePerHour": 33, "skill": 0.7, "safety": 0.75, "certifications": ["DOZER", "HAUL_TRUCK"] },
+    { "id": "emp-clyde", "name": "Clyde Maynard", "age": 58, "role": "OPERATOR", "experienceYears": 31, "wagePerHour": 37, "skill": 0.78, "safety": 0.82, "certifications": ["DRILL", { "type": "BLASTER", "expiresDay": 75 }] },
+    { "id": "emp-hank", "name": "Hank Mullins", "age": 64, "role": "MECHANIC", "experienceYears": 41, "wagePerHour": 36, "skill": 0.82, "safety": 0.8, "certifications": [] },
+    { "id": "emp-mae", "name": "Mae Gibson", "age": 23, "role": "OPERATOR", "experienceYears": 1, "wagePerHour": 25, "skill": 0.42, "safety": 0.55, "certifications": ["HAUL_TRUCK"] },
+    { "id": "emp-tommy", "name": "Tommy Fields", "age": 29, "role": "OPERATOR", "experienceYears": 5, "wagePerHour": 28, "skill": 0.55, "safety": 0.6, "certifications": ["DOZER", "DRILL"] }
+  ],
+  "customers": [
+    { "id": "cust-power", "name": "Tri-County Power Station", "type": "POWER_PLANT", "basePrice": 63, "maxAsh": 18, "maxSulfur": 2.5, "minBtu": 10800, "dailyDemandT": 4000 },
+    { "id": "cust-industrial", "name": "Valley Cement & Lime", "type": "INDUSTRIAL", "basePrice": 78, "maxAsh": 12, "maxSulfur": 1.6, "minBtu": 11900, "dailyDemandT": 1500 },
+    { "id": "cust-premium", "name": "Ridgeway Coke Works", "type": "PREMIUM", "basePrice": 92, "maxAsh": 8.5, "maxSulfur": 1.0, "minBtu": 12700, "dailyDemandT": 800 }
+  ]
+}

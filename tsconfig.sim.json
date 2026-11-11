@@ -1,0 +1,9 @@
+{
+  "//": "The simulation layer: no DOM, no WebGPU, no Forge-Engine. If this fails to compile because something in src/sim reached for the renderer, the architecture rule (spec §51) was broken.",
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": ["node"]
+  },
+  "include": ["src/sim/**/*.ts", "src/data/**/*.json", "tests/**/*.ts"]
+}

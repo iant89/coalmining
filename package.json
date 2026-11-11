@@ -1,0 +1,26 @@
+{
+  "name": "coalmining",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Black Creek — a surface coal mine simulator built on Forge-Engine",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --config vite.config.ts --host 0.0.0.0",
+    "build": "vite build --config vite.config.ts",
+    "typecheck": "tsc -p tsconfig.sim.json --noEmit && tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "lint:arch": "node tools/lint-arch.mjs",
+    "verify": "npm run lint:arch && npm run typecheck && npm test",
+    "check:browser": "node tools/browser-check.mjs"
+  },
+  "engines": {
+    "node": ">=20.11"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@webgpu/types": "^0.1.52",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7"
+  }
+}

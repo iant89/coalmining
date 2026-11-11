@@ -1,0 +1,14 @@
+{
+  "//": "The presentation layer: the browser game that renders the simulation with Forge-Engine. The engine is consumed from a sibling checkout (../Forge-Engine) through its package root only.",
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["@webgpu/types", "vite/client"],
+    "noUncheckedIndexedAccess": false,
+    "baseUrl": ".",
+    "paths": {
+      "@forge/engine": ["../Forge-Engine/engine/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*.ts", "src/data/**/*.json"]
+}
