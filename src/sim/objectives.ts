@@ -11,7 +11,7 @@ export interface ObjectiveDef {
 }
 
 export const SLICE_OBJECTIVES: ObjectiveDef[] = [
-  { id: "explore", title: "Drill an exploration core hole", done: (s) => s.state.samples.some((x) => x.kind === "CORE") },
+  { id: "explore", title: "Drill for coal (a core hole or blast holes)", done: (s) => s.state.samples.some((x) => x.kind === "CORE" || x.kind === "BLAST_HOLE") },
   { id: "seam", title: "Confirm the coal seam", done: (s) => s.state.seamDiscovered },
   { id: "drill", title: "Drill a blast pattern on a block", done: (s) => s.state.drillPatterns.some((p) => p.completedAt !== null) },
   { id: "blast", title: "Fire a blast", done: (s) => s.state.blasts.some((b) => b.state === "COMPLETED") },

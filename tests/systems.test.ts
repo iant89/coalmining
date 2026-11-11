@@ -134,7 +134,7 @@ test("save → load → continue gives the same result as never saving", () => {
   const a = blackCreek(99);
   orderBlockWork(a.sim, "A2", "OVERBURDEN");
   a.advanceMinutes(9 * 60);
-  const json = serialize(a.sim.sync(), "test");
+  const json = serialize(a.sim.sync(), "test", new Date(0));
   const loaded = deserialize(json);
   assert.equal(loaded.metadata.scenarioId, a.state.scenarioId);
   const b = new MineSimulation(loaded.state, catalog);

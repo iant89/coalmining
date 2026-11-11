@@ -117,7 +117,8 @@ export function migrate(state: Record<string, unknown>): SimState {
   return state as unknown as SimState;
 }
 
-export function serialize(state: SimState, saveName: string, now = new Date()): string {
+/** `now` is passed in: the simulation layer never reads the wall clock (tools/lint-arch.mjs). */
+export function serialize(state: SimState, saveName: string, now: Date): string {
   const metadata: SaveMetadata = {
     saveName,
     timestamp: now.toISOString(),

@@ -23,7 +23,8 @@ export interface PatternOptions {
 
 export const DEFAULT_PATTERN: PatternOptions = { spacing: 6, burden: 6, depthMode: "TO_COAL", depth: 14, subdrill: 0.6 };
 
-export function designPattern(sim: Sim, block: MiningBlock, opts: PatternOptions): DrillPattern {
+/** `id` defaults to a fresh simulation id; UI previews pass a fixed one so they never touch state. */
+export function designPattern(sim: Sim, block: MiningBlock, opts: PatternOptions, id?: string): DrillPattern {
   const t = sim.terrain;
   const x0 = t.cellX(block.rect.i0) - t.cellSize / 2;
   const x1 = t.cellX(block.rect.i1) + t.cellSize / 2;
@@ -51,7 +52,7 @@ export function designPattern(sim: Sim, block: MiningBlock, opts: PatternOptions
     }
   }
   const pattern: DrillPattern = {
-    id: sim.nextId("pattern"),
+    id: id ?? sim.nextId("pattern"),
     blockId: block.id,
     spacing: opts.spacing,
     burden: opts.burden,

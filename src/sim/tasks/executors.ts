@@ -899,6 +899,7 @@ const EXCAVATE: TaskExecutor = {
       const cap = payloadCapacity(sim, spotted, spotted.payload.type);
       if (spotted.payload.tonnes >= cap - 0.55 * out.parcel.tonnes) {
         spotted.stats.loads++;
+        eq.stats.loads++;
         releaseTruck(sim, head, spotted);
       }
     }

@@ -13,7 +13,8 @@ export const BLAST_EXCLUSION_M = 90;
 /** Rock broken below the hole bottom (m). */
 export const BOTTOM_BREAK_M = 0.8;
 
-export function designBlast(sim: Sim, block: MiningBlock, pattern: DrillPattern, chargeFactor: number): Blast {
+/** `id` defaults to a fresh simulation id; UI previews pass a fixed one so they never touch state. */
+export function designBlast(sim: Sim, block: MiningBlock, pattern: DrillPattern, chargeFactor: number, id?: string): Blast {
   const t = sim.terrain;
   const cf = Math.max(0.6, Math.min(1.4, chargeFactor));
   let volume = 0;
@@ -41,7 +42,7 @@ export function designBlast(sim: Sim, block: MiningBlock, pattern: DrillPattern,
   const proximity = clamp01(1 - (nearest - 60) / 260);
   const meanDepth = volume / Math.max(1, pattern.holes.length * pattern.spacing * pattern.burden);
   return {
-    id: sim.nextId("blast"),
+    id: id ?? sim.nextId("blast"),
     blockId: block.id,
     patternId: pattern.id,
     chargeFactor: cf,
