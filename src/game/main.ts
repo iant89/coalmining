@@ -28,6 +28,8 @@ const catalog = defaultCatalog();
 const params = new URLSearchParams(location.search);
 const DEBUG = params.get("dev") === "1" || import.meta.env.DEV;
 const AUTOSAVE_KEY = "black-creek:autosave";
+/** Screen-space pick radius for machines (CSS px): about a fingertip. */
+const PICK_RADIUS_PX = 22;
 /** Calendar day the scenario's day 1 falls on (early June: long days for the first shifts). */
 const START_DAY_OF_YEAR = 156;
 type Quality = "low" | "medium" | "high";
@@ -111,7 +113,10 @@ class Game implements GameApi {
     this.terrain = new TerrainView(this.engine, scene, sim);
     this.equipment = new EquipmentView(scene, this.kit, sim);
     this.world = new WorldView(this.engine, scene, this.kit, sim);
+    this.rig?.dispose();
     this.rig = new CameraRig(camEntity, camera, this.canvas, sim.terrain);
+    // Taps arrive from the camera rig (touch handlers suppress the browser's synthetic click).
+    this.rig.onTap = (x, y) => this.click(x, y);
     this.rig.follow = () => (this.selection?.kind === "equipment" ? this.equipment.pose(this.selection.id) : null);
     // First view: the east ridge where the shallow blocks are, as an isometric overview.
     this.rig.centerOn(120, 10, 230);
@@ -278,6 +283,24 @@ class Game implements GameApi {
       const p = this.equipment.pose(id)!;
       const t = raySphere(ray, p.x, p.y + p.height * 0.45, p.z, Math.max(3.5, p.radius * 0.6));
       if (t !== null && (!best || t < best.t)) best = { id, t };
+    }
+    // Zoomed out, a truck is a few pixels wide: also accept a click within a finger-sized
+    // radius of a machine's on-screen position, nearest first.
+    if (!best) {
+      const rect = this.canvas.getBoundingClientRect();
+      const px = cx - rect.left;
+      const py = cy - rect.top;
+      let bestPx = PICK_RADIUS_PX;
+      for (const id of this.equipment.ids()) {
+        const p = this.equipment.pose(id)!;
+        const s = project(this.rig.camera, this.canvas, p.x, p.y + p.height * 0.45, p.z);
+        if (!s) continue;
+        const d = Math.hypot(s.x - px, s.y - py);
+        if (d < bestPx) {
+          bestPx = d;
+          best = { id, t: 0 };
+        }
+      }
     }
     if (best) {
       this.select({ kind: "equipment", id: best.id });

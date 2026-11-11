@@ -21,6 +21,14 @@ export class CameraRig {
   private pinch: { d: number; a: number } | null = null;
   /** Set by the last pointer gesture: true when it was a drag, so the click handler ignores it. */
   dragged = false;
+  /**
+   * Called for a one-finger tap. The touch handlers must call preventDefault (or the page would
+   * scroll and zoom instead of the map), which also stops the browser synthesising a `click`, so
+   * taps are reported here instead.
+   */
+  onTap: ((clientX: number, clientY: number) => void) | null = null;
+  /** Where the current one-finger touch started, and whether it has moved far enough to be a drag. */
+  private touchStart: { x: number; y: number; moved: boolean } | null = null;
 
   constructor(
     private entity: Entity,
@@ -30,13 +38,18 @@ export class CameraRig {
   ) {
     const t = terrain;
     this.bounds = { x0: t.state.originX, z0: t.state.originZ, x1: t.state.originX + t.width, z1: t.state.originZ + t.depth };
-    canvas.addEventListener("pointerdown", (e) => {
+    // Every listener shares one abort signal so a rig replaced on New Game / Load lets go of the
+    // canvas instead of panning a dead camera and firing taps twice.
+    const signal = this.listeners.signal;
+    const on = <K extends keyof HTMLElementEventMap>(target: HTMLElement | Window, type: K, fn: (e: HTMLElementEventMap[K]) => void, opts: AddEventListenerOptions = {}): void =>
+      target.addEventListener(type, fn as EventListener, { ...opts, signal });
+    on(canvas, "pointerdown", (e) => {
       if (e.pointerType === "touch") return;
       this.drag = { button: e.altKey ? 2 : e.button, x: e.clientX, y: e.clientY, moved: false };
       this.dragged = false;
       canvas.setPointerCapture(e.pointerId);
     });
-    canvas.addEventListener("pointermove", (e) => {
+    on(canvas, "pointermove", (e) => {
       if (!this.drag || e.pointerType === "touch") return;
       const dx = e.clientX - this.drag.x;
       const dy = e.clientY - this.drag.y;
@@ -52,10 +65,10 @@ export class CameraRig {
       if (this.drag && canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
       this.drag = null;
     };
-    canvas.addEventListener("pointerup", end);
-    canvas.addEventListener("pointercancel", end);
-    canvas.addEventListener("contextmenu", (e) => e.preventDefault());
-    canvas.addEventListener(
+    on(canvas, "pointerup", end);
+    on(canvas, "pointercancel", end);
+    on(canvas, "contextmenu", (e) => e.preventDefault());
+    on(canvas, 
       "wheel",
       (e) => {
         e.preventDefault();
@@ -63,27 +76,42 @@ export class CameraRig {
       },
       { passive: false },
     );
-    canvas.addEventListener("touchstart", (e) => this.touch(e, true), { passive: false });
-    canvas.addEventListener("touchmove", (e) => this.touch(e, false), { passive: false });
-    canvas.addEventListener("touchend", () => {
+    on(canvas, "touchstart", (e) => this.touch(e, true), { passive: false });
+    on(canvas, "touchmove", (e) => this.touch(e, false), { passive: false });
+    on(canvas, "touchend", (e) => {
+      const start = this.touchStart;
+      const t = e.changedTouches[0];
+      // A tap: one finger that lifted without moving more than a few pixels and no pinch.
+      if (start && !start.moved && e.touches.length === 0 && t) this.onTap?.(t.clientX, t.clientY);
+      if (e.touches.length === 0) this.touchStart = null;
       this.pinch = null;
       this.lastTouch = null;
     });
-    window.addEventListener("keydown", (e) => {
+    on(window, "keydown", (e) => {
       if ((e.target as HTMLElement | null)?.closest?.("input, select, textarea")) return;
       this.keys.add(e.key.toLowerCase());
     });
-    window.addEventListener("keyup", (e) => this.keys.delete(e.key.toLowerCase()));
-    window.addEventListener("blur", () => this.keys.clear());
+    on(window, "keyup", (e) => this.keys.delete(e.key.toLowerCase()));
+    on(window, "blur", () => this.keys.clear());
   }
 
   private bounds: { x0: number; z0: number; x1: number; z1: number };
+  private readonly listeners = new AbortController();
+
+  /** Remove every input listener this rig added. */
+  dispose(): void {
+    this.listeners.abort();
+    this.onTap = null;
+    this.keys.clear();
+  }
   private lastTouch: { x: number; y: number } | null = null;
 
   private touch(e: TouchEvent, start: boolean): void {
     e.preventDefault();
     if (e.touches.length === 1) {
       const t = e.touches[0]!;
+      if (start) this.touchStart = { x: t.clientX, y: t.clientY, moved: false };
+      else if (this.touchStart && Math.hypot(t.clientX - this.touchStart.x, t.clientY - this.touchStart.y) > 8) this.touchStart.moved = true;
       if (!start && this.lastTouch) {
         const dx = t.clientX - this.lastTouch.x;
         const dy = t.clientY - this.lastTouch.y;
@@ -103,6 +131,7 @@ export class CameraRig {
       }
       this.pinch = { d, a: ang };
       this.dragged = true;
+      if (this.touchStart) this.touchStart.moved = true;
       this.lastTouch = null;
     }
   }

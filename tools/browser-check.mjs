@@ -129,7 +129,7 @@ await page.locator("#hud button[data-act=speed][data-id=\"50\"]").click();
 await frames(6);
 const mid = await g(() => {
   const s = window.blackCreek.game.ms.state;
-  return { blast: s.blasts[0]?.state, moved: s.blocks.find((b) => b.id === "A2").overburdenMovedT, loads: s.equipment.reduce((a, e) => a + e.stats.loads, 0) };
+  return { blast: s.blasts[0]?.state, moved: s.blocks.find((b) => b.id === "A2").overburdenMovedT, loads: s.equipment.filter((e) => e.defId.startsWith("ridgeline_rh")).reduce((a, e) => a + e.stats.loads, 0) };
 });
 check(mid.blast === "COMPLETED", `the blast fired (${mid.blast})`);
 check(mid.moved > 0, `overburden is moving (${Math.round(mid.moved)} t, ${mid.loads} truckloads)`);
@@ -192,6 +192,34 @@ const end = await g(() => window.blackCreek.engine.stats());
 check(end.gpuErrors === 0, `no GPU errors at the end (${end.gpuErrors}${end.lastError ? `: ${end.lastError}` : ""})`);
 check(errors.length === 0, `no page errors (${errors.slice(0, 5).join(" | ")})`);
 await shot("5-end");
+
+// Phones and the Claude app: a tap must select a machine (touch handlers suppress the browser's
+// synthetic click, so the camera rig reports taps itself).
+{
+  const { devices } = await import("playwright-core");
+  const ctx = await browser.newContext({ ...devices["Pixel 7"] });
+  const phone = await ctx.newPage();
+  phone.setDefaultTimeout(120000);
+  await phone.goto(URL);
+  await phone.waitForFunction(() => window.blackCreek, null, { timeout: 60000 });
+  const pf = async (n) => {
+    const t0 = await phone.evaluate(() => window.blackCreek.engine.stats().frame);
+    await phone.waitForFunction((t) => window.blackCreek.engine.stats().frame >= t, t0 + n, { timeout: 180000, polling: 250 });
+  };
+  await phone.evaluate(() => window.blackCreek.game.rig.centerOn(0, 104, 230));
+  await pf(4);
+  const target = await phone.evaluate(() => {
+    const { game } = window.blackCreek;
+    const e = game.ms.state.equipment.find((x) => x.name === "RH60 #1");
+    const p = game.equipment.pose(e.id);
+    return { id: e.id, s: game.screenPoint(p.x, p.z) };
+  });
+  if (target.s) await phone.touchscreen.tap(target.s.x, target.s.y);
+  await pf(1);
+  const tapped = await phone.evaluate(() => window.blackCreek.game.selection);
+  check(tapped?.kind === "equipment" && tapped.id === target.id, `a tap on a phone selects RH60 #1 at the default zoom (got ${JSON.stringify(tapped)})`);
+  await ctx.close();
+}
 
 await browser.close();
 console.log(problems.length ? `browser-check FAILED (${problems.length})` : "browser-check PASSED");
