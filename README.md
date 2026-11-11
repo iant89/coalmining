@@ -11,6 +11,12 @@ the 3D world is a view of it.
 
 ![Hauling overburden from Block A2](docs/images/hauling.png)
 
+## Play it
+
+**https://iant89.github.io/coalmining/** — deployed by `.github/workflows/pages.yml` on every push
+to `main`, built against Forge-Engine's `main` (run the workflow by hand to pick another engine
+ref). Needs a browser with WebGPU; add `?quality=low` on weak GPUs.
+
 ## Run it
 
 The game consumes Forge-Engine from a sibling checkout (the same way the engine's own demo does),

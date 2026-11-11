@@ -1,0 +1,89 @@
+name: Deploy to GitHub Pages
+
+# Builds the game against Forge-Engine and publishes it to https://<owner>.github.io/coalmining/.
+# The game consumes the engine from a sibling checkout (see README), so both repositories are
+# checked out side by side in the workspace.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      engine_ref:
+        description: "Forge-Engine branch, tag or commit to build against"
+        required: false
+        default: "main"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time; never cancel one that is already publishing.
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout coalmining
+        uses: actions/checkout@v4
+        with:
+          path: coalmining
+
+      - name: Checkout Forge-Engine
+        uses: actions/checkout@v4
+        with:
+          repository: iant89/Forge-Engine
+          ref: ${{ inputs.engine_ref || 'main' }}
+          path: Forge-Engine
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            coalmining/package-lock.json
+            Forge-Engine/package-lock.json
+
+      # Only the engine's runtime dependencies are needed to bundle it; its dev tooling
+      # (browser binaries, benchmarks) is not.
+      - name: Install Forge-Engine runtime dependencies
+        working-directory: Forge-Engine
+        run: npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+
+      - name: Install dependencies
+        working-directory: coalmining
+        run: npm ci --no-audit --no-fund
+
+      - name: Verify (architecture lint, typecheck, simulation tests)
+        working-directory: coalmining
+        run: npm run verify
+
+      - name: Build for Pages
+        working-directory: coalmining
+        run: npm run build -- --base=/${{ github.event.repository.name }}/
+
+      - name: Add .nojekyll
+        run: touch coalmining/dist/.nojekyll
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: coalmining/dist
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
