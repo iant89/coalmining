@@ -115,7 +115,7 @@ export function generateCandidate(sim: Sim, role: WorkerRole = "OPERATOR"): Empl
     blasting: role === "BLASTER" ? Math.min(1, base + 0.15) : r.range(0, 0.4),
     leadership: r.range(0.1, 0.7),
   };
-  const certPool = ["HAUL_TRUCK", "EXCAVATOR", "DOZER", "DRILL"];
+  const certPool = ["HAUL_TRUCK", "EXCAVATOR", "DOZER", "DRILL", "GRADER"];
   const certs = certPool.filter(() => r.chance(0.35 + experience * 0.02)).map((type) => ({ type, expiresDay: null as number | null }));
   if (certs.length === 0 && role === "OPERATOR") certs.push({ type: r.pick(certPool), expiresDay: null });
   if (role === "BLASTER" || (role === "OPERATOR" && r.chance(0.1))) certs.push({ type: "BLASTER", expiresDay: sim.day + r.int(60, 400) });

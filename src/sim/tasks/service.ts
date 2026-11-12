@@ -42,7 +42,32 @@ export const TASK_CATEGORY: Record<TaskType, EquipmentCategory | null> = {
   FUEL: null,
   MAINTENANCE: null,
   REPAIR: null,
+  CONSTRUCT: null,
+  GRADE_ROAD: "GRADER",
 };
+
+/**
+ * The machine category a task needs, which for some types depends on what it targets: a haul-road
+ * project is built by a dozer, a conveyor or stockpile by a contractor crew with no machine.
+ */
+export function categoryFor(sim: Sim, type: TaskType, target: TaskTarget | null | undefined): EquipmentCategory | null {
+  if (type === "CONSTRUCT") {
+    const p = target?.kind === "project" ? sim.state.projects.find((x) => x.id === target.id) : null;
+    return p?.type === "HAUL_ROAD" ? "DOZER" : null;
+  }
+  return TASK_CATEGORY[type];
+}
+
+/** Worker rule for tasks whose worker is not a machine's operator (undefined = the operator). */
+function ownWorker(sim: Sim, type: TaskType, target: TaskTarget | null | undefined): { role: WorkerRole | null; cert: string | null } | undefined {
+  if (type === "CONSTRUCT" && categoryFor(sim, type, target) === null) return { role: null, cert: null };
+  return OWN_WORKER[type];
+}
+
+/** A task that works on a conveyor rather than a machine. */
+function onConveyor(target: TaskTarget | null | undefined): boolean {
+  return target?.kind === "conveyor";
+}
 
 /** Task types that need a named machine even without a category. */
 const NEEDS_EQUIPMENT: ReadonlySet<TaskType> = new Set(["MOVE", "PARK", "FUEL", "MAINTENANCE", "REPAIR", "EXPLORE_DRILL", "DRILL_PATTERN", "STRIP_TOPSOIL", "EXCAVATE", "HAUL"]);
@@ -66,6 +91,8 @@ export const TASK_LABEL: Record<TaskType, string> = {
   FUEL: "Refuel",
   MAINTENANCE: "Scheduled maintenance",
   REPAIR: "Repair",
+  CONSTRUCT: "Construction",
+  GRADE_ROAD: "Grade haul road",
 };
 
 export interface TaskSpec {
@@ -87,7 +114,7 @@ export interface ValidationResult {
 
 function draft(sim: Sim, spec: TaskSpec): Task {
   const eq = sim.equipment(spec.equipmentId);
-  const own = OWN_WORKER[spec.type];
+  const own = ownWorker(sim, spec.type, spec.destination);
   const def = eq ? sim.def(eq) : null;
   return {
     id: "draft",
@@ -97,7 +124,7 @@ function draft(sim: Sim, spec: TaskSpec): Task {
     label: spec.label ?? TASK_LABEL[spec.type],
     source: spec.source ?? null,
     destination: spec.destination ?? null,
-    requiredEquipmentCategory: TASK_CATEGORY[spec.type],
+    requiredEquipmentCategory: categoryFor(sim, spec.type, spec.destination),
     assignedEquipmentId: eq?.id ?? null,
     equipmentLocked: !!eq,
     requiredWorkerRole: own ? own.role : (def?.requiredRole ?? null),
@@ -146,7 +173,7 @@ export function validateTask(sim: Sim, spec: TaskSpec): ValidationResult {
       if (cur) warnings.push(`${eq.name} is busy (${cur.label}); this task will queue behind it`);
     }
     if (spec.type !== "FUEL" && eq.fuelL / def.fuelCapacityL < 0.12) warnings.push(`${eq.name} is low on fuel (${Math.round((eq.fuelL / def.fuelCapacityL) * 100)}%)`);
-  } else if (NEEDS_EQUIPMENT.has(spec.type) && !t.requiredEquipmentCategory) {
+  } else if (NEEDS_EQUIPMENT.has(spec.type) && !t.requiredEquipmentCategory && !onConveyor(spec.destination)) {
     errors.push(`${TASK_LABEL[spec.type]} needs a machine`);
   } else if (t.requiredEquipmentCategory && !sim.state.equipment.some((e) => sim.def(e).category === t.requiredEquipmentCategory)) {
     errors.push(`The mine has no ${t.requiredEquipmentCategory.toLowerCase().replace("_", " ")}`);
@@ -287,7 +314,7 @@ function pickEquipment(sim: Sim, t: Task): { eq: EquipmentInstance | null; reaso
 }
 
 function pickWorker(sim: Sim, t: Task, eq: EquipmentInstance | null, busy: Map<string, string>): { w: Employee | null; reason: string | null } {
-  const own = OWN_WORKER[t.type];
+  const own = ownWorker(sim, t.type, t.destination);
   const def = eq ? sim.def(eq) : null;
   const role = own ? own.role : (def?.requiredRole ?? null);
   const cert = own ? own.cert : (def?.requiredCertification ?? null);

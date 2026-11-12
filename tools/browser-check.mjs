@@ -172,6 +172,58 @@ check(cashAfter > cashBefore + 10000, `selling coal to the power station brings 
 await page.keyboard.press("Escape");
 await page.keyboard.press("Escape");
 
+// Development phase 08: build a haul road and a conveyor through the UI, buy a grader.
+{
+  await g(() => {
+    const { game } = window.blackCreek;
+    game.select(null);
+    game.ms.state.treasury.cash += 3_000_000;
+    game.rig.centerOn(110, 50, 230);
+  });
+  await frames(3);
+  const clickGround = async (x, z) => {
+    const p = await g(({ x, z }) => window.blackCreek.game.screenPoint(x, z), { x, z });
+    if (!p) throw new Error(`ground point ${x},${z} is off screen`);
+    await page.mouse.click(p.x, p.y);
+    await frames(1);
+  };
+  await page.locator("#tabs button", { hasText: "MINE" }).click();
+  await page.locator("#drawer button", { hasText: "BUILD HAUL ROAD" }).click();
+  await clickGround(112, 108);
+  await clickGround(80, 0);
+  await page.locator("#modal button[data-act=dlg-assign]").click();
+  const roadTask = await g(() => window.blackCreek.game.ms.state.tasks.find((t) => t.type === "CONSTRUCT")?.status);
+  check(!!roadTask, `BUILD HAUL ROAD (two map clicks) creates a construction task (${roadTask})`);
+  await page.locator("#drawer button", { hasText: "BUILD CONVEYOR" }).click();
+  await clickGround(158, 40);
+  await page.locator("#modal select[name=dest]").selectOption("rom-1");
+  await page.locator("#modal button[data-act=dlg-assign]").click();
+  const projects = await g(() => window.blackCreek.game.ms.state.projects.map((p) => p.type));
+  check(projects.includes("HAUL_ROAD") && projects.includes("CONVEYOR"), `road and conveyor projects planned (${projects.join(", ")})`);
+  await page.locator("#tabs button", { hasText: "MINE" }).click();
+  await page.locator("#tabs button", { hasText: "EQUIPMENT" }).click();
+  await page.locator("#drawer tr", { hasText: "Motor Grader" }).locator("button").click();
+  await page.locator("#tabs button", { hasText: "EQUIPMENT" }).click();
+  await g(() => {
+    const { game } = window.blackCreek;
+    for (let h = 0; h < 96 && game.ms.state.projects.some((p) => p.status !== "COMPLETE"); h++) game.ms.advanceMinutes(60);
+  });
+  const built = await g(() => {
+    const s = window.blackCreek.game.ms.state;
+    return { roads: s.roadEdges.length, conveyors: s.conveyors.length, hoppers: s.hoppers.length, graders: s.equipment.filter((e) => e.defId === "ironback_gr14").length };
+  });
+  check(built.roads === 7 && built.conveyors === 1 && built.hoppers === 1 && built.graders === 1, `road, conveyor and grader in service (${JSON.stringify(built)})`);
+  await g(() => {
+    const { game } = window.blackCreek;
+    game.rig.centerOn(140, 80, 140);
+    game.rig.yaw = 2.0;
+  });
+  await frames(6);
+  const st8 = await g(() => window.blackCreek.engine.stats());
+  check(st8.gpuErrors === 0, `no GPU errors with conveyors and new roads (${st8.gpuErrors})`);
+  await shot("6-logistics");
+}
+
 // Geology overlay and a wide view.
 await g(() => {
   const { game } = window.blackCreek;

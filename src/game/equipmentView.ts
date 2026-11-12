@@ -6,7 +6,7 @@
 import { Color, Material, Quat, Vec3, type Entity, type Scene } from "@forge/engine";
 import type { Sim } from "../sim/sim.js";
 import type { EquipmentInstance } from "../sim/state.js";
-import { buildDozer, buildDrill, buildExcavator, buildHaulTruck, forgetRenderables, pitch, renderableOf, yaw, type EquipmentModel, type ModelKit } from "./models.js";
+import { buildDozer, buildDrill, buildExcavator, buildGrader, buildHaulTruck, forgetRenderables, pitch, renderableOf, yaw, type EquipmentModel, type ModelKit } from "./models.js";
 
 interface View {
   eq: EquipmentInstance;
@@ -62,7 +62,7 @@ export class EquipmentView {
 
   private create(eq: EquipmentInstance): View {
     const def = this.sim.def(eq);
-    const builders = { HAUL_TRUCK: buildHaulTruck, EXCAVATOR: buildExcavator, DRILL: buildDrill, DOZER: buildDozer } as const;
+    const builders = { HAUL_TRUCK: buildHaulTruck, EXCAVATOR: buildExcavator, DRILL: buildDrill, DOZER: buildDozer, GRADER: buildGrader } as const;
     const build = builders[def.category as keyof typeof builders] ?? buildHaulTruck;
     const model = build(this.scene, this.kit, `eq-${eq.id}`, def.color, def.size);
     let loadMaterial: Material | null = null;
@@ -184,6 +184,10 @@ export class EquipmentView {
         rod.transform.position = new Vec3(0, 4.0 - depth, 0.42);
         rod.transform.rotation = yaw(eq.activity === "drill" ? this.time * 8 : 0);
       }
+    } else if (cat === "GRADER" && pv.blade) {
+      // The moldboard drops to the road while grading.
+      const down = eq.activity === "push" ? 0.1 : 0.55;
+      pv.blade.transform.position = new Vec3(0, approach(pv.blade.transform.position.y, down, 4, dt), def.size.length * 0.05);
     } else if (cat === "DOZER" && pv.blade) {
       const bob = eq.activity === "push" ? Math.sin(this.time * 3) * 0.08 - 0.05 : 0.15;
       pv.blade.transform.position = new Vec3(0, 0.2 + bob, 2.6);

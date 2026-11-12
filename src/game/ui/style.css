@@ -116,6 +116,8 @@ svg.chart text { fill: var(--muted); font: 10px var(--mono); }
 #modal { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45); display: none; place-items: center; z-index: 20; }
 #modal.open { display: grid; }
 #modal.picking { background: transparent; pointer-events: none; }
+/* While the game waits for a map click, the drawer and side panel step aside. */
+body.picking-point #drawer, body.picking-point #context { display: none; }
 #modal.picking .dialog { opacity: 0.25; }
 .dialog { background: var(--bg2); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; width: min(620px, 94vw); max-height: 86vh; overflow-y: auto; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5); }
 .form { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; margin: 10px 0; }

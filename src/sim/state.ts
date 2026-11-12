@@ -132,7 +132,9 @@ export type TaskType =
   | "HAUL"
   | "FUEL"
   | "MAINTENANCE"
-  | "REPAIR";
+  | "REPAIR"
+  | "CONSTRUCT"
+  | "GRADE_ROAD";
 
 export type TaskStatus =
   | "CREATED"
@@ -156,7 +158,11 @@ export type TaskTarget =
   | { kind: "stockpile"; id: string }
   | { kind: "dump"; id: string }
   | { kind: "facility"; id: string }
-  | { kind: "equipment"; id: string };
+  | { kind: "equipment"; id: string }
+  | { kind: "road"; id: string }
+  | { kind: "project"; id: string }
+  | { kind: "conveyor"; id: string }
+  | { kind: "hopper"; id: string };
 
 export type ExcavateMode = "OVERBURDEN" | "COAL";
 
@@ -166,6 +172,8 @@ export interface TaskParams {
   /** HAUL: where each haul class goes. */
   spoilDumpId?: string;
   coalStockpileId?: string;
+  /** HAUL: deliver coal to this conveyor hopper instead of a stockpile. */
+  coalHopperId?: string;
   topsoilDumpId?: string;
   /** DRILL_PATTERN / BLAST: the pattern / blast record. */
   patternId?: string;
@@ -357,6 +365,81 @@ export interface Stockpile {
   outT: number;
 }
 
+// ------------------------------------------------------------------ construction & conveyors
+
+export type ConstructionType = "HAUL_ROAD" | "CONVEYOR" | "STOCKPILE";
+export type ProjectStatus = "PLANNED" | "IN_PROGRESS" | "COMPLETE" | "CANCELLED";
+
+export interface ConstructionProject {
+  id: string;
+  type: ConstructionType;
+  name: string;
+  status: ProjectStatus;
+  /** HAUL_ROAD: [start, end]; CONVEYOR: [hopper, discharge]; STOCKPILE: [site]. */
+  path: { x: number; z: number }[];
+  /** HAUL_ROAD: existing road node the road starts / ends at, if it snapped to one. */
+  startNodeId: string | null;
+  endNodeId: string | null;
+  /** 0…1 of the work done. */
+  progress: number;
+  /** Total cost, and what has been spent so far (paid as the work is done). */
+  cost: number;
+  spent: number;
+  /** Work-minutes the project needs at nominal rate. */
+  workMinutes: number;
+  /** CONVEYOR: belt capacity (t/h) and the stockpile it feeds (null = build a new one at the end). */
+  capacityTph: number | null;
+  stockpileId: string | null;
+  /** STOCKPILE: capacity (t). */
+  capacityT: number | null;
+  /** HAUL_ROAD: elevation profile ends, fixed at planning time so the graded road is what was shown. */
+  startElevation: number | null;
+  endElevation: number | null;
+  createdAt: number;
+  completedAt: number | null;
+}
+
+export interface Hopper {
+  id: string;
+  name: string;
+  x: number;
+  z: number;
+  capacityT: number;
+  tonnes: number;
+  quality: CoalQuality | null;
+  conveyorId: string;
+}
+
+export type ConveyorState = "OFFLINE" | "STARTING" | "RUNNING" | "JAMMED" | "MAINTENANCE" | "DAMAGED";
+
+export interface Conveyor {
+  id: string;
+  name: string;
+  hopperId: string;
+  stockpileId: string;
+  path: { x: number; z: number }[];
+  length: number;
+  /** Rated throughput, t/h. */
+  capacityTph: number;
+  /** Belt speed, m/s. */
+  speed: number;
+  powerKw: number;
+  state: ConveyorState;
+  /** The player switched it on; OFFLINE when false. */
+  enabled: boolean;
+  /** 0…100. */
+  condition: number;
+  operatingHours: number;
+  /** Material on the belt in transit (sum of `slices`). */
+  beltT: number;
+  /** Plug flow: each tick's load rides the belt as one slice and discharges at `arriveAt` (minute). */
+  slices: { tonnes: number; quality: CoalQuality | null; arriveAt: number }[];
+  /** Minutes left in a start-up sequence. */
+  startTimer: number;
+  totalT: number;
+  breakdown: { cause: string; minute: number } | null;
+}
+
 // ------------------------------------------------------------------ economy
 
 export type ExpenseCategory =
@@ -375,7 +458,9 @@ export type ExpenseCategory =
   | "land"
   | "loans"
   | "fines"
-  | "overhead";
+  | "overhead"
+  | "construction"
+  | "electricity";
 export type IncomeCategory = "coal sales" | "asset sales" | "other";
 
 export interface Transaction {
@@ -539,6 +624,9 @@ export interface SimState {
   facilities: Facility[];
   dumps: DumpArea[];
   stockpiles: Stockpile[];
+  projects: ConstructionProject[];
+  hoppers: Hopper[];
+  conveyors: Conveyor[];
   equipment: EquipmentInstance[];
   workers: Employee[];
   candidates: Employee[];
@@ -561,7 +649,15 @@ export interface SimState {
   today: DayStats;
   history: DayStats[];
   /** Behaviour switches. */
-  settings: { autoFuel: boolean; autoMaintenance: boolean; debug: boolean };
+  settings: {
+    autoFuel: boolean;
+    autoMaintenance: boolean;
+    /** Idle graders keep haul roads above the maintenance threshold (spec §11.2 MAINTAIN_ROAD). */
+    autoGrade: boolean;
+    debug: boolean;
+    /** Where coal orders send coal: a stockpile id or a hopper id (null = first coal stockpile). */
+    coalDestination: string | null;
+  };
   /** Story / tutorial objective progress (spec §42 grows from here). */
   objectives: { id: string; title: string; done: boolean }[];
 }

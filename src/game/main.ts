@@ -354,8 +354,15 @@ class Game implements GameApi {
   pickPoint(prompt: string): Promise<{ x: number; z: number } | null> {
     this.picking?.resolve(null);
     this.pickPrompt = prompt;
+    // Panels that cover the map step aside while the player is asked to click on it.
+    document.body.classList.add("picking-point");
     return new Promise((resolve) => {
-      this.picking = { resolve };
+      this.picking = {
+        resolve: (p) => {
+          document.body.classList.remove("picking-point");
+          resolve(p);
+        },
+      };
     });
   }
   setMarker(p: { x: number; z: number } | null): void {

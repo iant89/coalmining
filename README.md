@@ -50,6 +50,13 @@ URL options: `?new=1` ignores the autosave, `?seed=N` generates a different mine
 4. **Sell.** *FINANCE → SELL COAL*. Weathered coal near the outcrop is dirty — only the power
    station will take it. Deeper blocks are cleaner but cost more to uncover.
 5. **Grow.** Buy another truck, hire operators, fit upgrades, keep machines serviced.
+6. **Build logistics.** *MINE → Construction*: **BUILD HAUL ROAD** (click the start near an existing
+   road, then the end — a dozer grades it and trucks use it once it opens), **BUILD CONVEYOR** (click
+   where trucks tip into the hopper, choose the stockpile it feeds and 400 or 800 t/h), **BUILD
+   STOCKPILE**. Set *Coal routing* to the hopper and MINE COAL orders deliver to the belt; trucks
+   queue when the hopper is full. Buy a grader and it keeps worn roads above 70 % on its own.
+
+![A conveyor from a pit-side hopper to the ROM stockpile, and a new haul road](docs/images/logistics.png)
 
 Everything can also be done by hand: select a machine and **ASSIGN TASK** (the dialog validates
 before assignment and explains every problem).
@@ -63,7 +70,7 @@ Space pause · 1–9 speed · G geology · Esc close.
 | --- | --- |
 | `npm run dev` | Vite dev server for the game |
 | `npm run verify` | architecture lint + both typechecks + the simulation tests — run before committing |
-| `npm test` | 24 deterministic simulation tests (Node, no GPU) |
+| `npm test` | 31 deterministic simulation tests (Node, no GPU) |
 | `npm run lint:arch` | the simulation must not import the engine/DOM, use `Math.random` or read the clock |
 | `npm run check:browser` | real WebGPU in headless Chromium: plays the slice through the UI, writes `tools/shot-*.png` |
 | `npm run build` | production bundle in `dist/` |

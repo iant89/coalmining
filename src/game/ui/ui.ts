@@ -26,6 +26,9 @@ import { MATERIAL_LABEL } from "../../sim/world/materials.js";
 import { estimateAt } from "../../sim/world/geology.js";
 import { dumpCapacityLeftT } from "../../sim/logistics/stockpiles.js";
 import { SLICE_OBJECTIVES } from "../../sim/objectives.js";
+import { CONSTRUCTION, estimateConveyor, estimateRoad, estimateStockpile, snapRoad, type ProjectEstimate } from "../../sim/logistics/construction.js";
+import { hopperOf, transitMinutes } from "../../sim/logistics/conveyors.js";
+import { ROAD_MAINTENANCE_THRESHOLD } from "../../sim/automation.js";
 
 type Tab = "MINE" | "EQUIPMENT" | "WORKERS" | "TASKS" | "LAND" | "PERMITS" | "FINANCE" | "PLANT" | "SAFETY" | "REPORTS" | "SETTINGS";
 const TABS: Tab[] = ["MINE", "EQUIPMENT", "WORKERS", "TASKS", "LAND", "PERMITS", "FINANCE", "PLANT", "SAFETY", "REPORTS", "SETTINGS"];
@@ -310,7 +313,7 @@ export class GameUI {
           ${s.stockpiles.map((p) => `<tr><td>${esc(p.name)}</td><td>${tonnes(p.tonnes)}</td><td>${tonnes(p.capacityT - p.tonnes)}</td><td>${p.quality ? `ash ${p.quality.ash.toFixed(1)}% · S ${p.quality.sulfur.toFixed(2)}% · ${Math.round(p.quality.btu).toLocaleString()} BTU` : "—"}</td></tr>`).join("")}
           ${s.dumps.map((d) => `<tr><td>${esc(d.name)}</td><td>${tonnes(d.tonnes)}</td><td>${tonnes(dumpCapacityLeftT(sim, d))}</td><td class="muted">${esc(label(d.accepts))}</td></tr>`).join("")}</table>
           <div class="buttons"><button data-act="explore-pick" class="primary">DRILL EXPLORATION HOLE…</button><button data-act="overlay" data-id="GEOLOGY">SHOW GEOLOGY</button></div>
-          <h3>Haul roads</h3><table class="grid"><tr><th>Road</th><th>Condition</th><th>Limit</th></tr>${s.roadEdges.map((r) => `<tr><td>${esc(r.a)} → ${esc(r.b)}</td><td>${bar(r.condition / 100, conditionClass(r.condition))} ${roadConditionLabel(r.condition)}</td><td>${r.speedLimitKmh} km/h</td></tr>`).join("")}</table>`;
+          ${this.logisticsHtml()}`;
         break;
       }
       case "EQUIPMENT": {
@@ -370,7 +373,7 @@ export class GameUI {
         break;
       }
       case "PLANT":
-        html = `<h2>Preparation plant</h2><p class="muted">The first slice sells raw (run-of-mine) coal straight from the ROM stockpile. Crusher, screens, separators and loadout are development phase 09; conveyors are phase 08.</p>`;
+        html = `<h2>Preparation plant</h2><p class="muted">Coal is sold raw (run of mine) from the stockpiles. Crusher, screens, separators and loadout are development phase 09. Conveyors and construction are in the MINE tab.</p>`;
         break;
       case "SAFETY": {
         const rows = s.equipment.map((e) => ({ e, r: equipmentRisk(sim, e) })).sort((a, b) => b.r.score - a.r.score);
@@ -406,6 +409,7 @@ export class GameUI {
         html = `<h2>Settings</h2>
           <label class="toggle"><input type="checkbox" data-set="autoFuel" ${s.settings.autoFuel ? "checked" : ""}> Auto-refuel (trucks drive to the fuel station; a fuel truck serves excavators, drills and dozers)</label>
           <label class="toggle"><input type="checkbox" data-set="autoMaintenance" ${s.settings.autoMaintenance ? "checked" : ""}> Auto-file repairs when a machine breaks down</label>
+          <label class="toggle"><input type="checkbox" data-set="autoGrade" ${s.settings.autoGrade ? "checked" : ""}> Auto-grade haul roads: idle graders take the worst road below ${ROAD_MAINTENANCE_THRESHOLD}%</label>
           <h3>Save &amp; load</h3><div class="buttons">${[1, 2, 3].map((n) => `<button data-act="save" data-id="slot${n}">SAVE ${n}</button><button data-act="load" data-id="slot${n}">LOAD ${n}</button>`).join("")}</div>
           <div class="buttons"><button data-act="export">EXPORT SAVE FILE</button><button data-act="import">IMPORT SAVE FILE</button><button data-act="new" class="warn">NEW GAME</button></div>
           <h3>Controls</h3><p class="muted">Left-drag: pan · Right-drag / Alt+drag: orbit · Wheel: zoom · WASD/arrows: pan · Q/E: rotate · R/F: tilt · Space: pause · 1–9: speed · G: geology overlay · Esc: close · \`: developer panel (debug builds, ?dev=1)</p>`;
@@ -413,6 +417,164 @@ export class GameUI {
       }
     }
     morph(el, `<button class="close" data-act="tab" data-id="${this.tab}">✕</button>${html}`);
+  }
+
+  /** MINE tab, development phase 08: construction, coal routing, conveyors and haul roads. */
+  private logisticsHtml(): string {
+    const sim = this.sim;
+    const s = sim.state;
+    const active = s.projects.filter((p) => p.status === "PLANNED" || p.status === "IN_PROGRESS");
+    const recent = s.projects.filter((p) => p.status === "COMPLETE").slice(-3).reverse();
+    const dest = s.settings.coalDestination;
+    const destOptions = [
+      `<option value="" ${dest === null ? "selected" : ""}>${esc(s.stockpiles[0]?.name ?? "default stockpile")} (default)</option>`,
+      ...s.stockpiles.slice(1).map((p) => `<option value="${p.id}" ${dest === p.id ? "selected" : ""}>${esc(p.name)}</option>`),
+      ...s.hoppers.map((h) => `<option value="${h.id}" ${dest === h.id ? "selected" : ""}>${esc(h.name)} → conveyor</option>`),
+    ].join("");
+    const grading = new Set(s.tasks.filter((t) => t.type === "GRADE_ROAD" && !TERMINAL.has(t.status) && t.destination?.kind === "road").map((t) => (t.destination as { id: string }).id));
+    const hasGrader = s.equipment.some((e) => sim.def(e).category === "GRADER");
+    return `
+      <h3>Construction</h3>
+      <div class="buttons"><button class="primary" data-act="build-road">BUILD HAUL ROAD…</button><button class="primary" data-act="build-conveyor">BUILD CONVEYOR…</button><button data-act="build-stockpile">BUILD STOCKPILE…</button></div>
+      ${active.length || recent.length ? `<table class="grid"><tr><th>Project</th><th>Status</th><th>Progress</th><th>Cost</th><th></th></tr>${[...active, ...recent]
+        .map((p) => `<tr><td>${esc(p.name)} <span class="muted">${esc(label(p.type))}</span></td><td>${esc(label(p.status))}</td><td>${bar(p.progress)} ${pct(p.progress)}</td><td>${money(p.spent)} / ${money(p.cost)}</td><td>${p.status === "COMPLETE" ? "" : `<button data-act="project-cancel" data-id="${p.id}">CANCEL</button>`}</td></tr>`)
+        .join("")}</table>` : ""}
+      <h3>Coal routing</h3>
+      <label class="toggle">MINE COAL orders deliver to <select data-coal-dest="1">${destOptions}</select></label>
+      ${s.conveyors.length ? `<h3>Conveyors</h3><table class="grid"><tr><th>Conveyor</th><th>State</th><th>Hopper</th><th>On belt</th><th>Delivered</th><th>Condition</th><th></th></tr>${s.conveyors
+        .map((c) => {
+          const h = hopperOf(sim, c);
+          return `<tr><td>${esc(c.name)} <span class="muted">${Math.round(c.length)} m · ${c.capacityTph} t/h · ${transitMinutes(c).toFixed(1)} min</span></td><td class="${c.state === "DAMAGED" || c.state === "JAMMED" ? "bad" : c.state === "RUNNING" ? "good" : "muted"}">${esc(label(c.state))}${c.breakdown ? `<div class="muted">${esc(c.breakdown.cause)}</div>` : ""}</td><td>${h ? `${bar(h.tonnes / h.capacityT, h.tonnes > h.capacityT * 0.9 ? "warn" : "")} ${Math.round(h.tonnes)} t` : "—"}</td><td>${tonnes(c.beltT)}</td><td>${tonnes(c.totalT)}</td><td>${bar(c.condition / 100, conditionClass(c.condition))} ${c.condition.toFixed(0)}%</td><td><button data-act="conveyor-toggle" data-id="${c.id}">${c.enabled ? "SWITCH OFF" : "SWITCH ON"}</button>${c.state === "DAMAGED" || c.condition < 60 ? `<button class="warn" data-act="conveyor-repair" data-id="${c.id}">REPAIR</button>` : ""}</td></tr>`;
+        })
+        .join("")}</table>` : ""}
+      <h3>Haul roads <span class="muted">${s.settings.autoGrade ? (hasGrader ? `graders keep roads above ${ROAD_MAINTENANCE_THRESHOLD}%` : "buy a grader to maintain roads") : "auto-grading off"}</span></h3>
+      <table class="grid"><tr><th>Road</th><th>Condition</th><th>Limit</th><th></th></tr>${s.roadEdges
+        .map((r) => `<tr><td>${esc(r.a)} → ${esc(r.b)}</td><td>${bar(r.condition / 100, conditionClass(r.condition))} ${roadConditionLabel(r.condition)}</td><td>${r.speedLimitKmh} km/h</td><td>${grading.has(r.id) ? `<span class="muted">grading…</span>` : `<button data-act="grade-road" data-id="${r.id}" ${hasGrader ? "" : "disabled"}>GRADE</button>`}</td></tr>`)
+        .join("")}</table>`;
+  }
+
+  private estimateHtml(e: ProjectEstimate, extra: string[] = []): string {
+    const rows = [
+      e.length > 0 ? `<tr><td>Length</td><td>${Math.round(e.length)} m</td></tr>` : "",
+      e.grade !== null && e.type === "HAUL_ROAD" ? `<tr><td>Finished grade</td><td>${(e.grade * 100).toFixed(1)} %</td></tr>` : "",
+      e.grade !== null && e.type === "CONVEYOR" ? `<tr><td>Belt incline</td><td>${(e.grade * 100).toFixed(1)} %</td></tr>` : "",
+      e.earthworksM3 !== null ? `<tr><td>Earthworks</td><td>~${Math.round(e.earthworksM3).toLocaleString()} m³ cut and fill</td></tr>` : "",
+      ...extra,
+      `<tr><td>Cost</td><td>${money(e.cost)} <span class="muted">(paid as the work is done)</span></td></tr>`,
+      `<tr><td>Work</td><td>~${formatDuration(e.workMinutes)}</td></tr>`,
+    ].join("");
+    return `<table class="kv">${rows}</table>${e.problems.map((p) => `<div class="bad">✖ ${esc(p)}</div>`).join("")}${e.warnings.map((w) => `<div class="warn">⚠ ${esc(w)}</div>`).join("")}`;
+  }
+
+  private async roadDialog(): Promise<void> {
+    const sim = this.sim;
+    const from = await this.api.pickPoint("Click where the road starts (near an existing road joins it) — Esc to cancel");
+    if (!from) return;
+    this.api.setMarker(from);
+    const to = await this.api.pickPoint("Click where the road ends — Esc to cancel");
+    this.api.setMarker(null);
+    if (!to) return;
+    const dozers = sim.state.equipment.filter((e) => sim.def(e).category === "DOZER");
+    const snap = snapRoad(sim, { from, to });
+    const html = `
+      <h2>Build a haul road</h2>
+      <p class="muted">${snap.startNode ? `Starts at road junction ${esc(snap.startNode.id)}` : "Starts off the network"} · ${snap.endNode ? `ends at junction ${esc(snap.endNode.id)}` : "ends off the network"}. A dozer grades it to a straight profile between its ends; trucks can use it once it is finished.</p>
+      <div class="form"><label>Dozer <select name="dozer"><option value="">Any free dozer</option>${dozers.map((d) => `<option value="${d.id}">${esc(d.name)}</option>`).join("")}</select></label></div>
+      <div class="estimate">${this.estimateHtml(estimateRoad(sim, { from, to }), [`<tr><td>Width</td><td>${CONSTRUCTION.HAUL_ROAD.width} m, ${CONSTRUCTION.HAUL_ROAD.speedLimitKmh} km/h</td></tr>`])}</div>
+      <div class="buttons right"><button data-act="dlg-cancel">CANCEL</button><button class="primary" data-act="dlg-assign" ${estimateRoad(sim, { from, to }).problems.length ? "disabled" : ""}>BUILD</button></div>`;
+    const root = this.openDialog(html);
+    this.dialogActions = {
+      assign: () => {
+        const dozer = (root.querySelector("[name=dozer]") as HTMLSelectElement).value || null;
+        const r = cmd.buildRoad(sim, from, to, dozer);
+        if (!r.ok) {
+          root.querySelector(".estimate")!.insertAdjacentHTML("afterbegin", `<div class="bad">✖ ${esc(r.error)}</div>`);
+          return;
+        }
+        this.closeDialog();
+      },
+    };
+  }
+
+  private async conveyorDialog(): Promise<void> {
+    const sim = this.sim;
+    const from = await this.api.pickPoint("Click where trucks will tip into the hopper (near the pit) — Esc to cancel");
+    if (!from) return;
+    this.api.setMarker(from);
+    const cfg = CONSTRUCTION.CONVEYOR;
+    let to: { x: number; z: number } = { x: from.x, z: from.z };
+    const html = `
+      <h2>Build a conveyor</h2>
+      <p class="muted">A ${cfg.hopperCapacityT} t truck hopper and an overland belt. Trucks tip coal into the hopper; the belt carries it to the stockpile at no more than its rated capacity, and trucks queue when the hopper is full.</p>
+      <div class="form">
+        <label>Capacity <select name="tph">${cfg.capacityOptionsTph.map((v) => `<option value="${v}">${v} t/h</option>`).join("")}</select></label>
+        <label>Discharges into <select name="dest">${sim.state.stockpiles.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join("")}<option value="">A new stockpile (pick on the map)</option></select></label>
+        <label class="f-pick" style="display:none">New stockpile site <span class="pt">not set</span> <button type="button" data-act="dlg-pick">PICK ON MAP</button></label>
+      </div>
+      <div class="estimate"></div>
+      <div class="buttons right"><button data-act="dlg-cancel">CANCEL</button><button class="primary" data-act="dlg-assign">BUILD</button></div>`;
+    const read = (root: HTMLElement) => ({
+      tph: Number((root.querySelector("[name=tph]") as HTMLSelectElement).value),
+      dest: (root.querySelector("[name=dest]") as HTMLSelectElement).value || null,
+    });
+    const refresh = (root: HTMLElement): void => {
+      const o = read(root);
+      root.querySelector<HTMLElement>(".f-pick")!.style.display = o.dest ? "none" : "";
+      root.querySelector(".pt")!.textContent = o.dest ? "" : `${to.x.toFixed(0)}, ${to.z.toFixed(0)}`;
+      const e = estimateConveyor(sim, from, to, o.tph, o.dest);
+      root.querySelector(".estimate")!.innerHTML = this.estimateHtml(e, [`<tr><td>Power</td><td>~${Math.round(o.tph * cfg.kwPerTph + e.length * 0.15)} kW while running</td></tr>`]);
+      (root.querySelector("[data-act=dlg-assign]") as HTMLButtonElement).disabled = e.problems.length > 0;
+    };
+    const root = this.openDialog(html, refresh);
+    this.dialogActions = {
+      pick: async () => {
+        $("#modal").classList.add("picking");
+        const p = await this.api.pickPoint("Click the new stockpile's site — Esc to cancel");
+        $("#modal").classList.remove("picking");
+        if (p) to = p;
+        refresh(root);
+      },
+      assign: () => {
+        const o = read(root);
+        const r = cmd.buildConveyor(sim, from, to, o.tph, o.dest);
+        if (!r.ok) {
+          root.querySelector(".estimate")!.insertAdjacentHTML("afterbegin", `<div class="bad">✖ ${esc(r.error)}</div>`);
+          return;
+        }
+        this.api.setMarker(null);
+        this.closeDialog();
+      },
+    };
+  }
+
+  private async stockpileDialog(): Promise<void> {
+    const sim = this.sim;
+    const at = await this.api.pickPoint("Click the stockpile site — Esc to cancel");
+    if (!at) return;
+    this.api.setMarker(at);
+    const html = `
+      <h2>Build a coal stockpile</h2>
+      <div class="form"><label>Capacity <select name="cap">${CONSTRUCTION.STOCKPILE.capacityOptionsT.map((v) => `<option value="${v}" ${v === 10000 ? "selected" : ""}>${(v / 1000).toFixed(0)} kt</option>`).join("")}</select></label></div>
+      <div class="estimate"></div>
+      <div class="buttons right"><button data-act="dlg-cancel">CANCEL</button><button class="primary" data-act="dlg-assign">BUILD</button></div>`;
+    const cap = (root: HTMLElement) => Number((root.querySelector("[name=cap]") as HTMLSelectElement).value);
+    const refresh = (root: HTMLElement): void => {
+      const e = estimateStockpile(sim, at, cap(root));
+      root.querySelector(".estimate")!.innerHTML = this.estimateHtml(e);
+      (root.querySelector("[data-act=dlg-assign]") as HTMLButtonElement).disabled = e.problems.length > 0;
+    };
+    const root = this.openDialog(html, refresh);
+    this.dialogActions = {
+      assign: () => {
+        const r = cmd.buildStockpile(sim, at, cap(root));
+        if (!r.ok) {
+          root.querySelector(".estimate")!.insertAdjacentHTML("afterbegin", `<div class="bad">✖ ${esc(r.error)}</div>`);
+          return;
+        }
+        this.api.setMarker(null);
+        this.closeDialog();
+      },
+    };
   }
 
   // ---------------------------------------------------------------- dialogs
@@ -813,6 +975,29 @@ export class GameUI {
         fail(cmd.assignTask(sim, { type: "EXPLORE_DRILL", destination: { kind: "point", x: c.x, z: c.z }, params: { depth: 30 }, label: `Core hole in ${b.name}` }));
         break;
       }
+      case "build-road":
+        await this.roadDialog();
+        return;
+      case "build-conveyor":
+        await this.conveyorDialog();
+        return;
+      case "build-stockpile":
+        await this.stockpileDialog();
+        return;
+      case "project-cancel":
+        fail(cmd.cancelConstruction(sim, id));
+        break;
+      case "conveyor-toggle": {
+        const c = sim.state.conveyors.find((x) => x.id === id);
+        if (c) fail(cmd.switchConveyor(sim, id, !c.enabled));
+        break;
+      }
+      case "conveyor-repair":
+        fail(cmd.repairConveyorTask(sim, id));
+        break;
+      case "grade-road":
+        fail(cmd.gradeRoad(sim, id));
+        break;
       case "explore-pick": {
         const p = await this.api.pickPoint("Click where to drill the exploration hole (Esc to cancel)");
         if (p) fail(cmd.assignTask(sim, { type: "EXPLORE_DRILL", destination: { kind: "point", x: p.x, z: p.z }, params: { depth: 30 }, label: `Core hole at ${p.x.toFixed(0)}, ${p.z.toFixed(0)}` }));
@@ -915,10 +1100,17 @@ export class GameUI {
   /** Settings checkboxes. */
   bindSettings(): void {
     document.addEventListener("change", (e) => {
+      const sel = e.target as HTMLSelectElement;
+      if (sel.dataset?.coalDest) {
+        const r = cmd.setCoalDestination(this.sim, sel.value || null);
+        if (!r.ok) this.sim.notify("warn", "Can't do that", r.error);
+        return;
+      }
       const t = e.target as HTMLInputElement;
-      const key = t.dataset?.set as keyof Sim["state"]["settings"] | undefined;
-      if (!key) return;
-      (this.sim.state.settings as Record<string, boolean>)[key] = t.checked;
+      const key = t.dataset?.set;
+      const settings = this.sim.state.settings;
+      // Only the boolean switches are checkboxes.
+      if (key === "autoFuel" || key === "autoMaintenance" || key === "autoGrade") settings[key] = t.checked;
     });
   }
 

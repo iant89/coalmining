@@ -59,6 +59,22 @@ export interface PartOptions {
   shadow?: boolean;
 }
 
+/**
+ * `createTransformedEntity`, with the position also written through the transform handle.
+ *
+ * Models are built inside the game's system pass, where Forge queues the Transform component and
+ * keeps the pose on the component until the pass ends. A handle write in between (a part's scale or
+ * rotation) allocates the transform at the origin and, when the queue flushes, that origin pose
+ * wins: the entity renders at (0, 0, 0) and is culled. Writing the position through the handle
+ * first makes the pose live in the transform store from the start. (Forge-Engine bug; this stays
+ * correct after the engine fix.)
+ */
+export function placed(scene: Scene, name: string, pos: Vec3): Entity {
+  const e = scene.createTransformedEntity(name, pos);
+  e.transform.position = new Vec3(pos.x, pos.y, pos.z);
+  return e;
+}
+
 export function rotationXYZ(x: number, y: number, z: number): Quat {
   const qx = Quat.fromAxisAngle(RIGHT, x);
   const qy = Quat.fromAxisAngle(UP, y);
@@ -76,7 +92,7 @@ export function pitch(angle: number): Quat {
 
 /** An empty pivot entity under `parent`. */
 export function pivot(scene: Scene, parent: Entity, name: string, pos: [number, number, number]): Entity {
-  const e = scene.createTransformedEntity(name, new Vec3(pos[0], pos[1], pos[2]));
+  const e = placed(scene, name, new Vec3(pos[0], pos[1], pos[2]));
   parent.addChild(e);
   return e;
 }
@@ -99,7 +115,7 @@ export function forgetRenderables(e: Entity): void {
 }
 
 export function part(scene: Scene, kit: ModelKit, parent: Entity, name: string, o: PartOptions): Entity {
-  const e = scene.createTransformedEntity(name, new Vec3(o.pos[0], o.pos[1], o.pos[2]));
+  const e = placed(scene, name, new Vec3(o.pos[0], o.pos[1], o.pos[2]));
   parent.addChild(e);
   e.transform.scale = new Vec3(o.size[0], o.size[1], o.size[2]);
   if (o.rot) e.transform.rotation = rotationXYZ(o.rot[0], o.rot[1], o.rot[2]);
@@ -133,7 +149,7 @@ const GLASS = 0x8fb3c9;
 const STEEL = 0x6d7178;
 
 export function buildHaulTruck(scene: Scene, kit: ModelKit, name: string, color: string, size: { length: number; width: number; height: number }): EquipmentModel {
-  const root = scene.createTransformedEntity(name, new Vec3(0, 0, 0));
+  const root = placed(scene, name, new Vec3(0, 0, 0));
   const L = size.length;
   const W = size.width;
   const r = 0.95 * (W / 4.6);
@@ -160,7 +176,7 @@ export function buildHaulTruck(scene: Scene, kit: ModelKit, name: string, color:
 }
 
 export function buildExcavator(scene: Scene, kit: ModelKit, name: string, color: string, size: { length: number; width: number; height: number }): EquipmentModel {
-  const root = scene.createTransformedEntity(name, new Vec3(0, 0, 0));
+  const root = placed(scene, name, new Vec3(0, 0, 0));
   const W = size.width;
   part(scene, kit, root, `${name}.trackL`, { pos: [-W * 0.38, 0.55, 0], size: [0.9, 1.1, 5.4], color: 0x242424, roughness: 0.95 });
   part(scene, kit, root, `${name}.trackR`, { pos: [W * 0.38, 0.55, 0], size: [0.9, 1.1, 5.4], color: 0x242424, roughness: 0.95 });
@@ -180,7 +196,7 @@ export function buildExcavator(scene: Scene, kit: ModelKit, name: string, color:
 }
 
 export function buildDrill(scene: Scene, kit: ModelKit, name: string, color: string, size: { length: number; width: number; height: number }): EquipmentModel {
-  const root = scene.createTransformedEntity(name, new Vec3(0, 0, 0));
+  const root = placed(scene, name, new Vec3(0, 0, 0));
   const W = size.width;
   part(scene, kit, root, `${name}.trackL`, { pos: [-W * 0.36, 0.5, 0], size: [0.8, 1.0, 5.6], color: 0x242424, roughness: 0.95 });
   part(scene, kit, root, `${name}.trackR`, { pos: [W * 0.36, 0.5, 0], size: [0.8, 1.0, 5.6], color: 0x242424, roughness: 0.95 });
@@ -195,7 +211,7 @@ export function buildDrill(scene: Scene, kit: ModelKit, name: string, color: str
 }
 
 export function buildDozer(scene: Scene, kit: ModelKit, name: string, color: string, size: { length: number; width: number; height: number }): EquipmentModel {
-  const root = scene.createTransformedEntity(name, new Vec3(0, 0, 0));
+  const root = placed(scene, name, new Vec3(0, 0, 0));
   const W = size.width;
   part(scene, kit, root, `${name}.trackL`, { pos: [-W * 0.36, 0.55, -0.3], size: [0.75, 1.1, 4.0], color: 0x242424, roughness: 0.95 });
   part(scene, kit, root, `${name}.trackR`, { pos: [W * 0.36, 0.55, -0.3], size: [0.75, 1.1, 4.0], color: 0x242424, roughness: 0.95 });
@@ -208,8 +224,72 @@ export function buildDozer(scene: Scene, kit: ModelKit, name: string, color: str
   return { root, pivots: { blade }, parts: {}, radius: 4.5, height: size.height };
 }
 
+export function buildGrader(scene: Scene, kit: ModelKit, name: string, color: string, size: { length: number; width: number; height: number }): EquipmentModel {
+  const root = placed(scene, name, new Vec3(0, 0, 0));
+  const L = size.length;
+  const W = size.width;
+  // Long front frame over the front axle, tandem rear axles under the engine and cab.
+  part(scene, kit, root, `${name}.frame`, { pos: [0, 1.25, L * 0.12], size: [0.55, 0.5, L * 0.72], color });
+  part(scene, kit, root, `${name}.engine`, { pos: [0, 1.5, -L * 0.33], size: [W * 0.9, 1.3, L * 0.28], color });
+  part(scene, kit, root, `${name}.cab`, { pos: [0, 2.5, -L * 0.1], size: [W * 0.85, 1.5, 1.6], color });
+  part(scene, kit, root, `${name}.glass`, { pos: [0, 2.6, -L * 0.1 + 0.81], size: [W * 0.75, 0.9, 0.05], color: GLASS, roughness: 0.15, metallic: 0.3 });
+  const blade = pivot(scene, root, `${name}.blade`, [0, 0.55, L * 0.05]);
+  part(scene, kit, blade, `${name}.moldboard`, { pos: [0, 0, 0], size: [W * 1.45, 0.65, 0.25], color: STEEL, metallic: 0.5, roughness: 0.4, rot: [0, 0.45, 0] });
+  wheel(scene, kit, root, `${name}.wF1`, -W * 0.42, L * 0.42, 0.75, 0.5);
+  wheel(scene, kit, root, `${name}.wF2`, W * 0.42, L * 0.42, 0.75, 0.5);
+  for (const z of [-L * 0.25, -L * 0.42]) {
+    wheel(scene, kit, root, `${name}.wRL${z}`, -W * 0.42, z, 0.75, 0.5);
+    wheel(scene, kit, root, `${name}.wRR${z}`, W * 0.42, z, 0.75, 0.5);
+  }
+  return { root, pivots: { blade }, parts: {}, radius: L * 0.55, height: size.height };
+}
+
+/**
+ * An overland conveyor between two ground points: a truck hopper, a run of trussed frame sections on
+ * supports, the belt (with a load strip the view scales with the material on it) and a drive head
+ * over the discharge. Returns the belt-load part so the view can show what the belt carries.
+ */
+export function buildConveyor(scene: Scene, kit: ModelKit, id: string, a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }): { root: Entity; load: Entity; parts: Entity[] } {
+  const root = placed(scene, `conveyor-${id}`, new Vec3(0, 0, 0));
+  const parts: Entity[] = [];
+  const dx = b.x - a.x;
+  const dz = b.z - a.z;
+  const len = Math.hypot(dx, dz) || 1;
+  const yawA = Math.atan2(dx, dz);
+  // The belt starts low at the hopper and rises to discharge over the pile.
+  const y0 = a.y + 2.2;
+  const y1 = b.y + 9;
+  const slope = Math.atan2(y1 - y0, len);
+  const run = Math.hypot(len, y1 - y0);
+  const mid = { x: (a.x + b.x) / 2, y: (y0 + y1) / 2, z: (a.z + b.z) / 2 };
+  const beam = pivot(scene, root, `conveyor-${id}.beam`, [mid.x, mid.y, mid.z]);
+  beam.transform.rotation = rotationXYZ(-slope, yawA, 0);
+  parts.push(part(scene, kit, beam, `conveyor-${id}.frame`, { pos: [0, -0.25, 0], size: [1.6, 0.5, run], color: 0x7d858c, metallic: 0.5, roughness: 0.5 }));
+  parts.push(part(scene, kit, beam, `conveyor-${id}.belt`, { pos: [0, 0.03, 0], size: [1.2, 0.06, run], color: 0x1b1b1d, roughness: 0.9 }));
+  const load = part(scene, kit, beam, `conveyor-${id}.load`, { pos: [0, 0.15, 0], size: [0.9, 0.18, run], color: 0x101010, roughness: 0.8, shadow: false });
+  parts.push(part(scene, kit, beam, `conveyor-${id}.cover`, { pos: [0, 0.9, 0], size: [1.8, 0.08, run], color: 0x9aa3ab, metallic: 0.4, roughness: 0.5 }));
+  // Supports every ~14 m, from the ground up to the belt.
+  const n = Math.max(1, Math.floor(len / 14));
+  for (let k = 1; k <= n; k++) {
+    const f = k / (n + 1);
+    const x = a.x + dx * f;
+    const z = a.z + dz * f;
+    const gy = a.y + (b.y - a.y) * f;
+    const top = y0 + (y1 - y0) * f - 0.5;
+    const h = Math.max(0.5, top - gy);
+    parts.push(part(scene, kit, root, `conveyor-${id}.leg${k}`, { pos: [x, gy + h / 2, z], size: [0.25, h, 0.25], color: 0x6a7076, metallic: 0.5 }));
+  }
+  // Hopper: a steel box on legs the trucks back up to.
+  parts.push(part(scene, kit, root, `conveyor-${id}.hopper`, { pos: [a.x, a.y + 3.2, a.z], size: [5.5, 2.6, 5.5], color: 0x8a6f3a, metallic: 0.4, roughness: 0.6, rot: [0, yawA, 0] }));
+  parts.push(part(scene, kit, root, `conveyor-${id}.hopperBase`, { pos: [a.x, a.y + 1, a.z], size: [3, 2, 3], color: 0x5c636a, rot: [0, yawA, 0] }));
+  // Drive head over the discharge point.
+  parts.push(part(scene, kit, root, `conveyor-${id}.head`, { pos: [b.x, y1 + 0.3, b.z], size: [2.4, 1.6, 2.4], color: 0x3e5f8a, rot: [0, yawA, 0] }));
+  parts.push(part(scene, kit, root, `conveyor-${id}.tower`, { pos: [b.x, (b.y + y1) / 2, b.z], size: [0.4, y1 - b.y, 0.4], color: 0x6a7076, metallic: 0.5 }));
+  return { root, load, parts };
+}
+
 export function buildFacility(scene: Scene, kit: ModelKit, f: { id: string; type: string; x: number; z: number; width: number; depth: number; height: number; rotation: number }, ground: number): Entity {
-  const root = scene.createTransformedEntity(`fac-${f.id}`, new Vec3(f.x, ground, f.z));
+  const root = placed(scene, `fac-${f.id}`, new Vec3(f.x, ground, f.z));
   root.transform.rotation = yaw(f.rotation);
   const { width: w, depth: d, height: h } = f;
   switch (f.type) {

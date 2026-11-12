@@ -27,7 +27,7 @@ import { SLICE_OBJECTIVES } from "./objectives.js";
 import { generateCandidate } from "./workforce/workforce.js";
 import blackCreek from "../data/scenarios/black_creek.json" with { type: "json" };
 
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
 
 interface WorldRect {
   x0: number;
@@ -190,6 +190,9 @@ export function loadScenario(def: ScenarioDefinition, catalog: Catalog, override
     facilities: def.facilities.map((f) => ({ ...f })),
     dumps: def.dumps.map((d) => ({ id: d.id, name: d.name, rect: toRect(terrain, d.area), accepts: d.accepts, maxHeight: d.maxHeight, tonnes: 0 })),
     stockpiles: def.stockpiles.map((s) => ({ id: s.id, name: s.name, x: s.x, z: s.z, materialType: s.materialType as "COAL_RAW", capacityT: s.capacityT, tonnes: 0, quality: null, inT: 0, outT: 0 })),
+    projects: [],
+    hoppers: [],
+    conveyors: [],
     equipment: [],
     workers: [],
     candidates: [],
@@ -232,11 +235,13 @@ export function loadScenario(def: ScenarioDefinition, catalog: Catalog, override
     notifications: [],
     today: emptyDay(clock.day),
     history: [],
-    settings: { autoFuel: true, autoMaintenance: true, debug: false },
+    settings: { autoFuel: true, autoMaintenance: true, autoGrade: true, debug: false, coalDestination: null },
     objectives: SLICE_OBJECTIVES.map((o) => ({ id: o.id, title: o.title, done: false })),
   };
 
   const sim = new Sim(state, catalog);
+  // Scenario-numbered roads: start generated road ids after them.
+  state.idCounters.road = state.roadEdges.length;
   rasterizeRoads(sim);
 
   for (const w of def.workers) {

@@ -100,7 +100,7 @@
     { "id": "emp-earl", "name": "Earl Hatfield", "age": 61, "role": "OPERATOR", "experienceYears": 38, "wagePerHour": 41, "skill": 0.9, "safety": 0.85, "certifications": ["EXCAVATOR", "DOZER", "HAUL_TRUCK"], "note": "Foreman. Ran your grandfather's shovel for thirty years." },
     { "id": "emp-wanda", "name": "Wanda Slone", "age": 44, "role": "OPERATOR", "experienceYears": 17, "wagePerHour": 34, "skill": 0.75, "safety": 0.8, "certifications": ["HAUL_TRUCK", "EXCAVATOR"] },
     { "id": "emp-ray", "name": "Ray Combs", "age": 37, "role": "OPERATOR", "experienceYears": 9, "wagePerHour": 31, "skill": 0.62, "safety": 0.65, "certifications": ["HAUL_TRUCK"] },
-    { "id": "emp-dale", "name": "Dale Napier", "age": 52, "role": "OPERATOR", "experienceYears": 24, "wagePerHour": 33, "skill": 0.7, "safety": 0.75, "certifications": ["DOZER", "HAUL_TRUCK"] },
+    { "id": "emp-dale", "name": "Dale Napier", "age": 52, "role": "OPERATOR", "experienceYears": 24, "wagePerHour": 33, "skill": 0.7, "safety": 0.75, "certifications": ["DOZER", "HAUL_TRUCK", "GRADER"] },
     { "id": "emp-clyde", "name": "Clyde Maynard", "age": 58, "role": "OPERATOR", "experienceYears": 31, "wagePerHour": 37, "skill": 0.78, "safety": 0.82, "certifications": ["DRILL", { "type": "BLASTER", "expiresDay": 75 }] },
     { "id": "emp-hank", "name": "Hank Mullins", "age": 64, "role": "MECHANIC", "experienceYears": 41, "wagePerHour": 36, "skill": 0.82, "safety": 0.8, "certifications": [] },
     { "id": "emp-mae", "name": "Mae Gibson", "age": 23, "role": "OPERATOR", "experienceYears": 1, "wagePerHour": 25, "skill": 0.42, "safety": 0.55, "certifications": ["HAUL_TRUCK"] },

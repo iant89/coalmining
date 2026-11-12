@@ -4,7 +4,7 @@
  */
 import type { Sim } from "./sim.js";
 import type { Employee, EquipmentInstance, ExcavateMode, Task, WeatherKind } from "./state.js";
-import { createTask, TERMINAL, type TaskSpec } from "./tasks/service.js";
+import { cancelTask, createTask, TERMINAL, type TaskSpec } from "./tasks/service.js";
 import { designPattern, estimatePattern, type PatternOptions } from "./mining/drilling.js";
 import { designBlast } from "./mining/blasting.js";
 import { newEquipment } from "./scenario.js";
@@ -14,6 +14,9 @@ import { revealGeology } from "./mining/exploration.js";
 import { setWeather } from "./environment/weather.js";
 import { forceBreakdown } from "./tasks/executors.js";
 import { generateCandidate, operatorProblem } from "./workforce/workforce.js";
+import { cancelProject, planConveyorProject, planRoadProject, planStockpileProject, type ProjectEstimate } from "./logistics/construction.js";
+import { conveyorById, hopperById, setConveyorEnabled } from "./logistics/conveyors.js";
+import type { ConstructionProject } from "./state.js";
 
 export type CommandResult<T = undefined> = { ok: true; value: T; warnings?: string[] } | { ok: false; error: string };
 
@@ -92,10 +95,14 @@ export function orderBlockWork(sim: Sim, blockId: string, mode: ExcavateMode, op
   if (!ex.ok) return ex;
   created.push(ex.value);
   const trucks = opts.truckIds ?? sim.state.equipment.filter((e) => sim.def(e).category === "HAUL_TRUCK" && !e.currentTaskId).map((e) => e.id);
+  // Coal goes where the mine's coal routing says: a stockpile, or a conveyor hopper.
+  const dest = sim.state.settings.coalDestination;
+  const coalParams = hopperById(sim, dest) ? { coalHopperId: dest! } : sim.stockpile(dest) ? { coalStockpileId: dest! } : {};
   for (const id of trucks) {
     const h = assignTask(sim, {
       type: "HAUL",
       equipmentId: id,
+      params: mode === "COAL" ? coalParams : {},
       source: { kind: "task", id: ex.value.id },
       prerequisites: [...prereq],
       label: `Haul ${mode === "COAL" ? "coal" : "overburden"} from ${block.name}`,
@@ -204,6 +211,67 @@ export function trainCertification(sim: Sim, workerId: string, cert: string): Co
   if (c) c.expiresDay = expires;
   else w.certifications.push({ type: cert, expiresDay: expires });
   return ok(undefined);
+}
+
+// ---------------------------------------------------------------- construction & logistics (spec §22–24, §63)
+
+function startProject(sim: Sim, r: { project: ConstructionProject; estimate: ProjectEstimate } | { problems: string[] }, equipmentId?: string | null): CommandResult<{ project: ConstructionProject; task: Task; estimate: ProjectEstimate }> {
+  if ("problems" in r) return fail(r.problems.join("; "));
+  const t = assignTask(sim, { type: "CONSTRUCT", equipmentId: equipmentId ?? null, destination: { kind: "project", id: r.project.id }, label: `Build ${r.project.name}` });
+  if (!t.ok) {
+    r.project.status = "CANCELLED";
+    return t;
+  }
+  sim.notify("info", `${r.project.name} planned`, `$${r.estimate.cost.toLocaleString()}, about ${Math.round(r.estimate.workMinutes / 60)} h of work. Paid as the work is done.`);
+  return ok({ project: r.project, task: t.value, estimate: r.estimate }, r.estimate.warnings);
+}
+
+/** Plan a haul road and order a dozer to build it. */
+export function buildRoad(sim: Sim, from: { x: number; z: number }, to: { x: number; z: number }, dozerId?: string | null) {
+  return startProject(sim, planRoadProject(sim, { from, to }), dozerId);
+}
+
+/** Plan a hopper + conveyor feeding `stockpileId` (or a new stockpile at `to`) and hire the crew. */
+export function buildConveyor(sim: Sim, from: { x: number; z: number }, to: { x: number; z: number }, capacityTph: number, stockpileId: string | null) {
+  return startProject(sim, planConveyorProject(sim, from, to, capacityTph, stockpileId));
+}
+
+export function buildStockpile(sim: Sim, at: { x: number; z: number }, capacityT: number) {
+  return startProject(sim, planStockpileProject(sim, at, capacityT));
+}
+
+export function cancelConstruction(sim: Sim, projectId: string): CommandResult<undefined> {
+  const e = cancelProject(sim, projectId);
+  if (e) return fail(e);
+  for (const t of sim.state.tasks) if (t.type === "CONSTRUCT" && t.destination?.kind === "project" && t.destination.id === projectId) cancelTask(sim, t.id, "Project cancelled");
+  return ok(undefined);
+}
+
+export function switchConveyor(sim: Sim, conveyorId: string, on: boolean): CommandResult<undefined> {
+  const c = conveyorById(sim, conveyorId);
+  if (!c) return fail("Unknown conveyor");
+  if (on && (c.state === "DAMAGED" || c.state === "MAINTENANCE")) return fail(`${c.name} is ${c.state === "DAMAGED" ? "broken down" : "under repair"}`);
+  setConveyorEnabled(sim, c, on);
+  return ok(undefined);
+}
+
+export function repairConveyorTask(sim: Sim, conveyorId: string): CommandResult<Task> {
+  const c = conveyorById(sim, conveyorId);
+  if (!c) return fail("Unknown conveyor");
+  return assignTask(sim, { type: "REPAIR", destination: { kind: "conveyor", id: c.id }, priority: "HIGH", label: `Repair ${c.name}` });
+}
+
+/** Where MINE COAL orders send coal: a stockpile or hopper id, or null for the default stockpile. */
+export function setCoalDestination(sim: Sim, id: string | null): CommandResult<undefined> {
+  if (id !== null && !sim.stockpile(id) && !hopperById(sim, id)) return fail("Unknown stockpile or hopper");
+  sim.state.settings.coalDestination = id;
+  return ok(undefined);
+}
+
+export function gradeRoad(sim: Sim, roadId: string, graderId?: string | null): CommandResult<Task> {
+  const r = sim.state.roadEdges.find((e) => e.id === roadId);
+  if (!r) return fail("Unknown road");
+  return assignTask(sim, { type: "GRADE_ROAD", equipmentId: graderId ?? null, destination: { kind: "road", id: r.id }, label: `Grade road ${r.a} → ${r.b}` });
 }
 
 // ---------------------------------------------------------------- developer commands (spec §56, §78)

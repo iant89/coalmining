@@ -85,6 +85,24 @@ Overlays, block estimates and drill designs use the estimate; digging uses the t
   sends coal to spoil. Coal recovery is 95 % less blast damage.
 - Dumps raise terrain cells near the tipping point up to a height limit; stockpiles blend quality.
 
+### Logistics and construction (development phase 08)
+
+- **Construction** (`logistics/construction.ts`, data in `src/data/construction.json`): a project is
+  planned with a full estimate (cost, work time, finished grade, earthworks, warnings), paid pro rata
+  as work is done, and changes the world only when finished. Each project is worked by a `CONSTRUCT`
+  task: a dozer for haul roads (it grades the alignment cell by cell to a straight profile as it
+  advances), a day-shift contractor crew for conveyors and stockpiles. A finished road joins the
+  road graph, so routing uses it from the next trip.
+- **Conveyors** (`logistics/conveyors.ts`): hopper → belt → stockpile, a directed edge of the
+  logistics graph, simulated at pipeline step 09. The belt is plug flow: each tick loads at most the
+  rated capacity × dt as one slice, which discharges whole after `length / speed`, so throughput can
+  never exceed capacity (tested). A full stockpile jams the belt, idle belts stop, running belts
+  draw power and wear, and breakdowns need a mechanic (`REPAIR` on a conveyor target).
+- **Road maintenance**: graders run `GRADE_ROAD`; with auto-grading on, an hourly dispatch sends idle
+  graders to the worst road below the threshold (`automation.ts`, spec §11.2 MAINTAIN_ROAD).
+- **Coal routing**: `settings.coalDestination` points MINE COAL orders at a stockpile or a hopper.
+  Coal is accounted exactly: a truck keeps any part-load a full hopper or stockpile cannot take.
+
 ## Presentation
 
 - `TerrainView`: one mesh + one colour texture per 16×16-cell chunk, rebuilt only when the chunk's
@@ -101,7 +119,9 @@ Overlays, block estimates and drill designs use the estimate; digging uses the t
   the button under the cursor.
 - The game runs as an engine `ISystem` (gameplay band, order 200). Forge journals component
   additions made during a system pass, so views keep references to the renderables they create
-  instead of looking them up (`models.ts`).
+  instead of looking them up (`models.ts`), and create entities with `placed()`, which writes the
+  position through the transform handle so a scale or rotation set in the same pass cannot reset it
+  to the origin.
 
 ## Extending
 

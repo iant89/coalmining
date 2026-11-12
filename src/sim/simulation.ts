@@ -16,7 +16,8 @@ import { dailyMarket } from "./economy/market.js";
 import { processLab } from "./mining/exploration.js";
 import { newDayWorkforce } from "./workforce/workforce.js";
 import { updateObjectives } from "./objectives.js";
-import { wireAutomation } from "./automation.js";
+import { autoDispatch, wireAutomation } from "./automation.js";
+import { tickConveyors } from "./logistics/conveyors.js";
 
 export function emptyDay(day: number): DayStats {
   return {
@@ -67,6 +68,8 @@ export class MineSimulation {
     blastClearance(sim);
     // 04–11. Workers, equipment, tasks, mining, logistics (executors drive all of these).
     tickTasks(sim);
+    // 09. Conveyors.
+    tickConveyors(sim);
     for (const e of sim.state.equipment) {
       if (e.state === "BROKEN") {
         e.stats.downMin += sim.dt;
@@ -81,7 +84,10 @@ export class MineSimulation {
     }
     // 14–18. Economy, contracts, events, notifications, statistics.
     if (minute) sim.accrue(sim.state.overheadPerDay / (24 * 60), "overhead");
-    if (hour) sim.flushAccruals();
+    if (hour) {
+      autoDispatch(sim);
+      sim.flushAccruals();
+    }
     if (sim.clock.isDayBoundary) this.endOfDay();
   }
 

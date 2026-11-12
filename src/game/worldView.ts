@@ -7,7 +7,8 @@
 import { Vec3, type Engine, type Entity, type Scene } from "@forge/engine";
 import type { Sim } from "../sim/sim.js";
 import type { CellRect } from "../sim/world/terrain.js";
-import { buildFacility, part, renderableOf, type ModelKit } from "./models.js";
+import { buildConveyor, buildFacility, forgetRenderables, part, placed, renderableOf, type ModelKit } from "./models.js";
+import { alongPath } from "../sim/logistics/construction.js";
 import type { EquipmentView } from "./equipmentView.js";
 
 /**
@@ -40,6 +41,7 @@ export interface Highlight {
 
 export class WorldView {
   private stockpiles = new Map<string, { root: Entity; cone: Entity }>();
+  private conveyors = new Map<string, { root: Entity; load: Entity; run: number }>();
   private facilities: Entity[] = [];
   readonly lines = { blocks: true, holes: true, samples: true, routes: true, dumps: true };
 
@@ -105,7 +107,7 @@ export class WorldView {
     for (const s of sim.state.stockpiles) {
       let e = this.stockpiles.get(s.id);
       if (!e) {
-        const root = this.scene.createTransformedEntity(`stockpile-${s.id}`, new Vec3(s.x, t.heightAt(s.x, s.z), s.z));
+        const root = placed(this.scene, `stockpile-${s.id}`, new Vec3(s.x, t.heightAt(s.x, s.z), s.z));
         const cone = part(this.scene, this.kit, root, `stockpile-${s.id}.cone`, { pos: [0, 0.5, 0], size: [1, 1, 1], color: 0x161616, geometry: "cone", roughness: 0.75 });
         e = { root, cone };
         this.stockpiles.set(s.id, e);
@@ -118,6 +120,43 @@ export class WorldView {
       if (r) r.visible = vis;
       // Footprint marker so the empty pile is still findable.
       if (this.lines.dumps) this.circle(s.x, s.z, Math.max(10, R + 2), rgba(70, 70, 70), 24, 0.3);
+    }
+
+    // Conveyors: built once when commissioned; the load strip shows what the belt is carrying.
+    for (const c of sim.state.conveyors) {
+      let v = this.conveyors.get(c.id);
+      if (!v) {
+        const a = c.path[0]!;
+        const b = c.path[c.path.length - 1]!;
+        const m = buildConveyor(this.scene, this.kit, c.id, { x: a.x, y: t.heightAt(a.x, a.z), z: a.z }, { x: b.x, y: t.heightAt(b.x, b.z), z: b.z });
+        v = { root: m.root, load: m.load, run: c.length };
+        this.conveyors.set(c.id, v);
+      }
+      const r = renderableOf(v.load);
+      if (r) r.visible = c.beltT > 0.5;
+      const color = c.state === "DAMAGED" ? rgba(255, 70, 60) : c.state === "JAMMED" ? rgba(255, 170, 40) : c.state === "RUNNING" ? rgba(110, 220, 120) : rgba(150, 150, 150);
+      const a = c.path[0]!;
+      this.circle(a.x, a.z, 5, color, 16, 0.4);
+    }
+
+    // Construction in progress: the finished part solid, the rest as a planned line.
+    for (const p of sim.state.projects) {
+      if (p.status !== "PLANNED" && p.status !== "IN_PROGRESS") continue;
+      const a = p.path[0]!;
+      const b = p.path[p.path.length - 1]!;
+      if (p.type === "STOCKPILE") {
+        this.circle(a.x, a.z, 18, rgba(120, 200, 255), 32, 0.5, p.progress > 0 ? 2 : 0);
+        continue;
+      }
+      const at = alongPath(p, p.progress);
+      if (p.progress > 0) this.line(a.x, a.z, at.x, at.z, rgba(255, 210, 90), 0.9, 2.5);
+      this.line(at.x, at.z, b.x, b.z, rgba(120, 200, 255), 0.9, 1.2);
+      const half = p.type === "HAUL_ROAD" ? 5 : 1.2;
+      const len = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+      const nx = (-(b.z - a.z) / len) * half;
+      const nz = ((b.x - a.x) / len) * half;
+      this.line(a.x + nx, a.z + nz, b.x + nx, b.z + nz, rgba(120, 200, 255, 200), 0.5);
+      this.line(a.x - nx, a.z - nz, b.x - nx, b.z - nz, rgba(120, 200, 255, 200), 0.5);
     }
 
     if (this.lines.dumps) {
@@ -186,6 +225,10 @@ export class WorldView {
   dispose(): void {
     for (const e of this.facilities) e.destroy();
     for (const e of this.stockpiles.values()) e.root.destroy();
+    for (const c of this.conveyors.values()) {
+      forgetRenderables(c.root);
+      c.root.destroy();
+    }
   }
 }
 
