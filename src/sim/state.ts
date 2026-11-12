@@ -10,7 +10,7 @@ import type { GeoSample, GeologyState } from "./world/geology.js";
 
 // ------------------------------------------------------------------ equipment
 
-export type EquipmentCategory = "EXCAVATOR" | "HAUL_TRUCK" | "DRILL" | "DOZER" | "LOADER" | "WATER_TRUCK" | "GRADER" | "SERVICE_TRUCK";
+export type EquipmentCategory = "EXCAVATOR" | "HAUL_TRUCK" | "DRILL" | "DOZER" | "LOADER" | "WATER_TRUCK" | "GRADER" | "SERVICE_TRUCK" | "LUBE_TRUCK";
 
 export type EquipmentStateName =
   | "PARKED"
@@ -65,6 +65,12 @@ export interface EquipmentInstance {
   breakdown: { cause: string; minute: number } | null;
   /** Moving out of (or holding outside) a blast exclusion zone; the task executor is suspended. */
   evacuating: boolean;
+  /** A lube or service truck is working on this machine: its own task waits. */
+  serviceHold: { by: string; reason: string } | null;
+  /** Lube trucks: diesel carried for refuelling other machines, L. */
+  cargoFuelL: number;
+  /** Operating hours since the lube truck last greased it; dry pins and bushings wear faster. */
+  hoursSinceGrease: number;
   /** Presentation hints written by executors: what the machine is visibly doing. */
   activity: "idle" | "drive" | "dig" | "swing" | "dump" | "drill" | "push" | "fuel" | "service" | "broken";
   stats: { workingMin: number; idleMin: number; downMin: number; tonnesMoved: number; loads: number };
@@ -132,7 +138,11 @@ export type TaskType =
   | "HAUL"
   | "FUEL"
   | "MAINTENANCE"
-  | "REPAIR";
+  | "REPAIR"
+  | "CONSTRUCT"
+  | "GRADE_ROAD"
+  | "FIELD_FUEL"
+  | "SERVICE_CALL";
 
 export type TaskStatus =
   | "CREATED"
@@ -156,7 +166,11 @@ export type TaskTarget =
   | { kind: "stockpile"; id: string }
   | { kind: "dump"; id: string }
   | { kind: "facility"; id: string }
-  | { kind: "equipment"; id: string };
+  | { kind: "equipment"; id: string }
+  | { kind: "road"; id: string }
+  | { kind: "project"; id: string }
+  | { kind: "conveyor"; id: string }
+  | { kind: "hopper"; id: string };
 
 export type ExcavateMode = "OVERBURDEN" | "COAL";
 
@@ -166,12 +180,16 @@ export interface TaskParams {
   /** HAUL: where each haul class goes. */
   spoilDumpId?: string;
   coalStockpileId?: string;
+  /** HAUL: deliver coal to this conveyor hopper instead of a stockpile. */
+  coalHopperId?: string;
   topsoilDumpId?: string;
   /** DRILL_PATTERN / BLAST: the pattern / blast record. */
   patternId?: string;
   blastId?: string;
   /** EXPLORE_DRILL: target depth. */
   depth?: number;
+  /** SERVICE_CALL: what the mechanic does on arrival. */
+  service?: "REPAIR" | "PM";
 }
 
 export interface Task {
@@ -214,6 +232,8 @@ export interface Task {
   phaseTimer: number;
   /** Executor scratch values that must survive a save (target cell index, hole index …). */
   scratch: Record<string, number>;
+  /** The crew whose foreman issued this task: only that crew's machines and people work it. */
+  crewId: string | null;
 }
 
 // ------------------------------------------------------------------ mining
@@ -357,6 +377,130 @@ export interface Stockpile {
   outT: number;
 }
 
+// ------------------------------------------------------------------ construction & conveyors
+
+export type ConstructionType = "HAUL_ROAD" | "CONVEYOR" | "STOCKPILE";
+export type ProjectStatus = "PLANNED" | "IN_PROGRESS" | "COMPLETE" | "CANCELLED";
+
+export interface ConstructionProject {
+  id: string;
+  type: ConstructionType;
+  name: string;
+  status: ProjectStatus;
+  /** HAUL_ROAD: [start, end]; CONVEYOR: [hopper, discharge]; STOCKPILE: [site]. */
+  path: { x: number; z: number }[];
+  /** HAUL_ROAD: existing road node the road starts / ends at, if it snapped to one. */
+  startNodeId: string | null;
+  endNodeId: string | null;
+  /** 0…1 of the work done. */
+  progress: number;
+  /** Total cost, and what has been spent so far (paid as the work is done). */
+  cost: number;
+  spent: number;
+  /** Work-minutes the project needs at nominal rate. */
+  workMinutes: number;
+  /** CONVEYOR: belt capacity (t/h) and the stockpile it feeds (null = build a new one at the end). */
+  capacityTph: number | null;
+  stockpileId: string | null;
+  /** STOCKPILE: capacity (t). */
+  capacityT: number | null;
+  /** HAUL_ROAD: elevation profile ends, fixed at planning time so the graded road is what was shown. */
+  startElevation: number | null;
+  endElevation: number | null;
+  createdAt: number;
+  completedAt: number | null;
+}
+
+export interface Hopper {
+  id: string;
+  name: string;
+  x: number;
+  z: number;
+  capacityT: number;
+  tonnes: number;
+  quality: CoalQuality | null;
+  conveyorId: string;
+}
+
+export type ConveyorState = "OFFLINE" | "STARTING" | "RUNNING" | "JAMMED" | "MAINTENANCE" | "DAMAGED";
+
+export interface Conveyor {
+  id: string;
+  name: string;
+  hopperId: string;
+  stockpileId: string;
+  path: { x: number; z: number }[];
+  length: number;
+  /** Rated throughput, t/h. */
+  capacityTph: number;
+  /** Belt speed, m/s. */
+  speed: number;
+  powerKw: number;
+  state: ConveyorState;
+  /** The player switched it on; OFFLINE when false. */
+  enabled: boolean;
+  /** 0…100. */
+  condition: number;
+  operatingHours: number;
+  /** Material on the belt in transit (sum of `slices`). */
+  beltT: number;
+  /** Plug flow: each tick's load rides the belt as one slice and discharges at `arriveAt` (minute). */
+  slices: { tonnes: number; quality: CoalQuality | null; arriveAt: number }[];
+  /** Minutes left in a start-up sequence. */
+  startTimer: number;
+  totalT: number;
+  breakdown: { cause: string; minute: number } | null;
+}
+
+// ------------------------------------------------------------------ management (crews, foremen, meeting)
+
+export type CrewOrderType = "REMOVE_OVERBURDEN" | "MINE_COAL" | "STRIP_TOPSOIL" | "EXPLORE_BLOCK" | "MAINTAIN_ROADS";
+
+export interface CrewOrder {
+  id: string;
+  type: CrewOrderType;
+  blockId: string | null;
+  status: "PENDING" | "ACTIVE" | "DONE" | "STUCK";
+  /** The foreman's latest word on it ("Waiting for the blast", "Excavator broken down"). */
+  note: string | null;
+  /** Tasks the foreman issued for this order. */
+  taskIds: string[];
+  /** Times the foreman has issued work for it without finishing (gives up as STUCK after a few). */
+  attempts: number;
+  issuedDay: number;
+  doneDay: number | null;
+}
+
+/** A crew led by a foreman: the unit the player manages instead of individual machines. */
+export interface Crew {
+  id: string;
+  name: string;
+  foremanId: string | null;
+  equipmentIds: string[];
+  workerIds: string[];
+  /** In priority order; standing orders (MAINTAIN_ROADS) never finish. */
+  orders: CrewOrder[];
+  /** Minute the foreman last looked over the work. */
+  lastCheck: number;
+  /** Tonnes moved by the crew's machines at the last meeting (for the daily report). */
+  tonnesAtMeeting: number;
+}
+
+export interface CrewReport {
+  crewId: string;
+  crewName: string;
+  foremanName: string | null;
+  lines: { severity: "info" | "good" | "warn" | "critical"; text: string }[];
+}
+
+/** The morning meeting held at each shift start (the UI pauses for it). */
+export interface MorningMeeting {
+  day: number;
+  minute: number;
+  pending: boolean;
+  reports: CrewReport[];
+}
+
 // ------------------------------------------------------------------ economy
 
 export type ExpenseCategory =
@@ -375,7 +519,9 @@ export type ExpenseCategory =
   | "land"
   | "loans"
   | "fines"
-  | "overhead";
+  | "overhead"
+  | "construction"
+  | "electricity";
 export type IncomeCategory = "coal sales" | "asset sales" | "other";
 
 export interface Transaction {
@@ -539,6 +685,11 @@ export interface SimState {
   facilities: Facility[];
   dumps: DumpArea[];
   stockpiles: Stockpile[];
+  projects: ConstructionProject[];
+  hoppers: Hopper[];
+  conveyors: Conveyor[];
+  crews: Crew[];
+  meeting: MorningMeeting | null;
   equipment: EquipmentInstance[];
   workers: Employee[];
   candidates: Employee[];
@@ -561,7 +712,17 @@ export interface SimState {
   today: DayStats;
   history: DayStats[];
   /** Behaviour switches. */
-  settings: { autoFuel: boolean; autoMaintenance: boolean; debug: boolean };
+  settings: {
+    autoFuel: boolean;
+    autoMaintenance: boolean;
+    /** Idle graders keep haul roads above the maintenance threshold (spec §11.2 MAINTAIN_ROAD). */
+    autoGrade: boolean;
+    debug: boolean;
+    /** Where coal orders send coal: a stockpile id or a hopper id (null = first coal stockpile). */
+    coalDestination: string | null;
+    /** Hold a meeting with the foremen at every shift start. */
+    morningMeeting: boolean;
+  };
   /** Story / tutorial objective progress (spec §42 grows from here). */
   objectives: { id: string; title: string; done: boolean }[];
 }

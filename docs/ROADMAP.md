@@ -10,11 +10,11 @@ system exists at the depth the first vertical slice needs; the spec's later dept
 | 01 | Engine integration, bootstrap, clock, scene, selection, camera, UI, save/load | **Done** — 5 s tick clock with speeds, Forge scene + day/night from the sim clock, picking, 4 camera modes, HUD/panels/dialogs, versioned saves (localStorage + file export/import, autosave) |
 | 02 | Mine world, terrain chunks, roads, environment, map bounds | **Done (slice)** — 96×96 heightfield in 16-cell chunks with dirty rebuilds, road graph rasterised into the terrain, bounded camera |
 | 03 | Geology, coal seam, overburden, materials, exploration, drilling | **Done (slice)** — layered geology with quality, true vs known geology, core holes with lab delay, blast-hole logging, legacy samples |
-| 04 | Equipment, movement, state, fuel, wear, maintenance | **Done (slice)** — data-driven catalog (5 models), upgrades, routing over roads/off-road with grade/load/weather/operator effects, fuel, wear, breakdown hazard, service and repair |
-| 05 | Workforce, skills, hiring, operators, fatigue | **Done (slice)** — 8 employees, skills, certifications with expiry, shifts, fatigue, payroll with burden, applicants, training |
+| 04 | Equipment, movement, state, fuel, wear, maintenance | **Done (slice)** — data-driven catalog (8 models), upgrades, lube trucks (field refuelling and greasing; grease interval affects wear) and service trucks (field repairs and preventive maintenance by the mechanic), routing over roads/off-road with grade/load/weather/operator effects, fuel, wear, breakdown hazard, service and repair |
+| 05 | Workforce, skills, hiring, operators, fatigue | **Done (slice)** — 9 employees, skills, certifications with expiry, shifts, fatigue, payroll with burden, applicants, training. **Management:** foremen lead crews (machines + people) from prioritised orders (remove overburden, mine coal, strip topsoil, core-drill a block, keep roads graded), staff tasks only from their crew, follow them up on rounds paced by leadership, re-drill unbroken rock; a morning meeting at each shift start reports per crew and is where the player re-plans |
 | 06 | Task architecture, queue, dependencies, assignment, dispatch, AI | **Done** — full lifecycle, validation with reasons, prerequisites, priorities, Role/Equipment/Movement AI layers, production-objective orders |
 | 07 | Benches, blasting, overburden, coal exposure, extraction | **Done (slice)** — mining blocks with states, pattern design, abstract blast design (fragmentation, vibration/airblast/flyrock, coal damage), exclusion-zone clearance, top-down excavation, coal recovery |
-| 08 | Haul roads, stockpiles, conveyors, routing | **Partial** — roads (condition, traffic and rain wear), dumps, ROM stockpile, truck queuing. Conveyors not started; graders/water trucks not started |
+| 08 | Haul roads, stockpiles, conveyors, routing | **Done (slice)** — data-driven construction projects (`src/data/construction.json`) built through tasks: haul roads built by a dozer that grades the alignment and joins the road graph; truck hoppers + overland conveyors (plug-flow belt, rated capacity, start-up, jams on a full stockpile, power cost, wear, breakdowns, mechanic repairs); player-built stockpiles; graders and an automatic road-maintenance objective; coal routing to a stockpile or hopper. Water trucks / dust not started (they belong with phase 14's dust) |
 | 09 | Preparation plant | Not started — raw coal is sold from the ROM stockpile |
 | 10 | Economy | **Partial** — treasury, ledger, daily reports, payroll, fuel, maintenance, explosives, royalties, overhead, three customers with quality specs and drifting prices. Contracts and loans not started |
 | 11 | Land | **Partial** — one leased parcel with royalty, mineral-rights checks. Negotiation/acquisition not started |
@@ -39,8 +39,8 @@ system exists at the depth the first vertical slice needs; the spec's later dept
 - [x] Assign operators
 - [x] Move haul trucks
 - [x] Haul material
-- [ ] Build a haul road
-- [ ] Build a conveyor
+- [x] Build a haul road
+- [x] Build a conveyor
 - [ ] Process coal (raw coal only)
 - [x] Sell coal
 - [x] Buy equipment
@@ -59,16 +59,21 @@ system exists at the depth the first vertical slice needs; the spec's later dept
 
 ## Next steps, in the spec's priority order (§71)
 
-1. Construction as tasks (§63): haul roads first (graders, road condition upkeep), then dumps and
-   stockpiles placed by the player; the navigation graph already re-plans per trip.
+1. Phase 09, preparation plant (§25): feeder → crusher → screen → separator fed by a conveyor, clean
+   coal and refuse, recovery and power; the conveyor network already delivers to any stockpile.
 2. Simulation tiers (§58) once fleets grow: statistical simulation for distant/off-screen machines.
-3. Logistics: conveyors as a directed graph with throughput limits (and the spec's conveyor test).
+3. Player-placed dumps and pit ramps (construction is data-driven; these are new project types).
 4. Economy: contracts with delivery schedules, loans.
 5. Regulation: inspector agent, rule-driven violations, fines, corrective actions.
 6. Reclamation: backfill, grade, topsoil, seed — topsoil salvage is already tracked.
 7. Campaign chapters 2–10 on the objective system.
 
 ## Known limitations
+
+- Foremen do not yet plan blocks themselves (which block next) or ask to hire; the player gives
+  every order. Crews share the support trucks, which are dispatched mine-wide.
+- Haul roads are straight segments between two points; curves are built from several roads.
+- Conveyors are single straight flights from one hopper to one stockpile (no transfer points yet).
 
 - Pit access is not modelled: trucks drive straight over pit walls (slowed by grade).
 - Workers are records, not walking characters.

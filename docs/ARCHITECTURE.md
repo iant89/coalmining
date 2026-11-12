@@ -85,6 +85,46 @@ Overlays, block estimates and drill designs use the estimate; digging uses the t
   sends coal to spoil. Coal recovery is 95 % less blast damage.
 - Dumps raise terrain cells near the tipping point up to a height limit; stockpiles blend quality.
 
+### Logistics and construction (development phase 08)
+
+- **Construction** (`logistics/construction.ts`, data in `src/data/construction.json`): a project is
+  planned with a full estimate (cost, work time, finished grade, earthworks, warnings), paid pro rata
+  as work is done, and changes the world only when finished. Each project is worked by a `CONSTRUCT`
+  task: a dozer for haul roads (it grades the alignment cell by cell to a straight profile as it
+  advances), a day-shift contractor crew for conveyors and stockpiles. A finished road joins the
+  road graph, so routing uses it from the next trip.
+- **Conveyors** (`logistics/conveyors.ts`): hopper → belt → stockpile, a directed edge of the
+  logistics graph, simulated at pipeline step 09. The belt is plug flow: each tick loads at most the
+  rated capacity × dt as one slice, which discharges whole after `length / speed`, so throughput can
+  never exceed capacity (tested). A full stockpile jams the belt, idle belts stop, running belts
+  draw power and wear, and breakdowns need a mechanic (`REPAIR` on a conveyor target).
+- **Road maintenance**: graders run `GRADE_ROAD`; with auto-grading on, an hourly dispatch sends idle
+  graders to the worst road below the threshold (`automation.ts`, spec §11.2 MAINTAIN_ROAD).
+- **Coal routing**: `settings.coalDestination` points MINE COAL orders at a stockpile or a hopper.
+  Coal is accounted exactly: a truck keeps any part-load a full hopper or stockpile cannot take.
+
+### Management: support trucks, foremen and the morning meeting
+
+- **Lube truck** (`FIELD_FUEL`): every ten minutes `supportDispatch` sends an idle lube truck to the
+  thirstiest machine (below 35 % fuel or over 60 h since greasing). It fills its own and its cargo
+  tank at the fuel station when low, parks beside the machine and pumps. While it works it sets the
+  machine's `serviceHold`, which pauses that machine's own task without blocking it (the hold is
+  released with the lube truck's task). With a lube truck on site the contractor bowser is only a
+  last resort below 5 %.
+- **Service truck** (`SERVICE_CALL`): a breakdown files a field repair when a service truck exists
+  (otherwise the old walking `REPAIR`); overdue machines get a preventive service in the field.
+- **Crews** (`management/crews.ts`): a crew is a foreman plus machines and people, with a prioritised
+  order list. Tasks carry a `crewId`; assignment (`pickEquipment`/`pickWorker`) then only considers
+  the crew's machines and people. On each round (every 12–42 min by the foreman's leadership, on
+  shift only) the foreman retires finished orders, reports what blocks running ones, re-issues work
+  that ended unfinished (up to three times, then STUCK with a reason) and starts the next order
+  when its machine is free. Orders lower in the list wait for machines claimed by higher ones.
+  Player orders (`crewId` null) can still use any machine.
+- **Morning meeting** (`management/meeting.ts`): at every shift start `holdMeeting` writes a report per
+  crew (tonnes hauled since the last meeting, orders, broken or overdue machines, tired people,
+  foremen without a crew). The simulation does not wait for it; the UI pauses the clock while the
+  meeting is pending and `closeMeeting` ends it and sends the foremen out at once.
+
 ## Presentation
 
 - `TerrainView`: one mesh + one colour texture per 16×16-cell chunk, rebuilt only when the chunk's
@@ -101,7 +141,9 @@ Overlays, block estimates and drill designs use the estimate; digging uses the t
   the button under the cursor.
 - The game runs as an engine `ISystem` (gameplay band, order 200). Forge journals component
   additions made during a system pass, so views keep references to the renderables they create
-  instead of looking them up (`models.ts`).
+  instead of looking them up (`models.ts`), and create entities with `placed()`, which writes the
+  position through the transform handle so a scale or rotation set in the same pass cannot reset it
+  to the origin.
 
 ## Extending
 
@@ -109,6 +151,8 @@ Overlays, block estimates and drill designs use the estimate; digging uses the t
   `equipment/catalog.ts`, and (for a new category) add a model builder in `src/game/models.ts`.
 - **Upgrades**: add to `upgrades.json`; effects are multipliers on named stats read by the sim.
 - **Scenarios** (spec §54): add JSON in `src/data/scenarios` and register it in `scenario.ts`.
+- **Crew orders**: add to `CrewOrderType`, give it a done condition, the machine category it needs
+  and how it is issued in `management/crews.ts`.
 - **Task types**: add to `TaskType`, give it an executor in `executors.ts` and a category in
   `TASK_CATEGORY`; validation, assignment, blocking and the UI come for free.
 - **Save format**: bump `SAVE_VERSION` and add a step to `MIGRATIONS` in `save/save.ts`.

@@ -38,7 +38,14 @@ frames, not milliseconds, and uses `?quality=low`.
   made in that repo with its own tests and its AGENTS.md rules (change-log, mnemosyne).
 - **Inside an engine system pass, components you add are journaled.** `entity.get(Renderable)`
   right after `addComponent` returns undefined; keep references (`models.ts` → `renderableOf`).
+  Create entities with `placed()`, not `scene.createTransformedEntity()`: a scale or rotation set in
+  the same pass otherwise resets the position to the origin (fixed in Forge-Engine too).
 - **Panels are patched, not replaced** (`ui/morph.ts`), so clicks land while numbers update.
+- **Crew tasks carry `crewId`**: they are staffed only from that crew. Anything that creates tasks
+  for a foreman must pass it; player commands leave it null.
+- **A `serviceHold` pauses a machine's own task** while a lube or service truck works on it; it is
+  released when that truck's task ends (`release` in `tasks/service.ts`).
+- **The morning meeting pauses only the UI**: tests and headless runs keep ticking with it pending.
 - Forge debug-line colours are `0xAARRGGBB`; alpha < 128 means emissive radiance.
 
 ## Tests

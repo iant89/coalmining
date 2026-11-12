@@ -5,8 +5,19 @@
     "name": "High-efficiency engine tune",
     "description": "Leaner fuel map: burns less fuel at a small cost in top speed.",
     "price": 38000,
-    "categories": ["HAUL_TRUCK", "EXCAVATOR", "DRILL", "DOZER"],
-    "modifiers": { "fuelBurn": 0.86, "speed": 0.97 }
+    "categories": [
+      "HAUL_TRUCK",
+      "EXCAVATOR",
+      "DRILL",
+      "DOZER",
+      "GRADER",
+      "LUBE_TRUCK",
+      "SERVICE_TRUCK"
+    ],
+    "modifiers": {
+      "fuelBurn": 0.86,
+      "speed": 0.97
+    }
   },
   {
     "id": "engine_high_power",
@@ -14,8 +25,16 @@
     "name": "High-power engine",
     "description": "More power on grade: faster loaded travel, more fuel.",
     "price": 64000,
-    "categories": ["HAUL_TRUCK", "DOZER"],
-    "modifiers": { "speed": 1.08, "gradeability": 1.3, "fuelBurn": 1.12, "wear": 1.05 }
+    "categories": [
+      "HAUL_TRUCK",
+      "DOZER"
+    ],
+    "modifiers": {
+      "speed": 1.08,
+      "gradeability": 1.3,
+      "fuelBurn": 1.12,
+      "wear": 1.05
+    }
   },
   {
     "id": "body_coal",
@@ -23,8 +42,12 @@
     "name": "Coal body",
     "description": "Larger, lighter body for low-density coal. Overburden payload is unchanged.",
     "price": 52000,
-    "categories": ["HAUL_TRUCK"],
-    "modifiers": { "coalPayload": 1.25 }
+    "categories": [
+      "HAUL_TRUCK"
+    ],
+    "modifiers": {
+      "coalPayload": 1.25
+    }
   },
   {
     "id": "body_high_capacity",
@@ -32,8 +55,15 @@
     "name": "High-capacity body",
     "description": "+12% payload; slower to accelerate and heavier on fuel and tyres.",
     "price": 71000,
-    "categories": ["HAUL_TRUCK"],
-    "modifiers": { "payload": 1.12, "speed": 0.95, "fuelBurn": 1.06, "wear": 1.06 }
+    "categories": [
+      "HAUL_TRUCK"
+    ],
+    "modifiers": {
+      "payload": 1.12,
+      "speed": 0.95,
+      "fuelBurn": 1.06,
+      "wear": 1.06
+    }
   },
   {
     "id": "tires_heavy_duty",
@@ -41,8 +71,13 @@
     "name": "Heavy-duty tyres",
     "description": "Tougher casings: less wear on rough or wet roads.",
     "price": 29000,
-    "categories": ["HAUL_TRUCK"],
-    "modifiers": { "roadWear": 0.6, "wear": 0.92 }
+    "categories": [
+      "HAUL_TRUCK"
+    ],
+    "modifiers": {
+      "roadWear": 0.6,
+      "wear": 0.92
+    }
   },
   {
     "id": "electronics_monitoring",
@@ -50,8 +85,18 @@
     "name": "Condition monitoring",
     "description": "Sensors flag failing components early: far fewer surprise breakdowns.",
     "price": 24000,
-    "categories": ["HAUL_TRUCK", "EXCAVATOR", "DRILL", "DOZER"],
-    "modifiers": { "breakdownHazard": 0.45 }
+    "categories": [
+      "HAUL_TRUCK",
+      "EXCAVATOR",
+      "DRILL",
+      "DOZER",
+      "GRADER",
+      "LUBE_TRUCK",
+      "SERVICE_TRUCK"
+    ],
+    "modifiers": {
+      "breakdownHazard": 0.45
+    }
   },
   {
     "id": "bucket_rock",
@@ -59,7 +104,12 @@
     "name": "Heavy rock bucket",
     "description": "Digs poorly fragmented rock faster; slightly smaller capacity.",
     "price": 41000,
-    "categories": ["EXCAVATOR"],
-    "modifiers": { "roughDig": 1.35, "bucket": 0.95 }
+    "categories": [
+      "EXCAVATOR"
+    ],
+    "modifiers": {
+      "roughDig": 1.35,
+      "bucket": 0.95
+    }
   }
 ]

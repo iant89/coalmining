@@ -3,6 +3,7 @@
  * finances and customers. `loadScenario` turns a definition into a fresh `SimState`; nothing about
  * a particular mine is hard-coded in simulation code.
  */
+import { holdMeeting } from "./management/meeting.js";
 import { valueNoise, Rng } from "./core/rng.js";
 import { SimClock } from "./core/clock.js";
 import { Terrain, type CellRect } from "./world/terrain.js";
@@ -27,7 +28,7 @@ import { SLICE_OBJECTIVES } from "./objectives.js";
 import { generateCandidate } from "./workforce/workforce.js";
 import blackCreek from "../data/scenarios/black_creek.json" with { type: "json" };
 
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 3;
 
 interface WorldRect {
   x0: number;
@@ -82,6 +83,8 @@ export interface ScenarioDefinition {
   stockpiles: { id: string; name: string; x: number; z: number; materialType: string; capacityT: number }[];
   blocks: { id: string; name: string; area: WorldRect }[];
   equipment: { defId: string; name: string; x: number; z: number; heading: number; condition: number; hours: number; hoursSinceService: number; fuelPct: number; operator: string | null }[];
+  /** Crews by equipment name and worker id. */
+  crews?: { id: string; name: string; foreman: string | null; equipment: string[]; workers: string[] }[];
   workers: {
     id: string;
     name: string;
@@ -134,6 +137,9 @@ export function newEquipment(id: string, defId: string, name: string, x: number,
     upgrades: [],
     breakdown: null,
     evacuating: false,
+    serviceHold: null,
+    cargoFuelL: 0,
+    hoursSinceGrease: 0,
     activity: "idle",
     stats: { workingMin: 0, idleMin: 0, downMin: 0, tonnesMoved: 0, loads: 0 },
     purchasedDay: 0,
@@ -190,6 +196,11 @@ export function loadScenario(def: ScenarioDefinition, catalog: Catalog, override
     facilities: def.facilities.map((f) => ({ ...f })),
     dumps: def.dumps.map((d) => ({ id: d.id, name: d.name, rect: toRect(terrain, d.area), accepts: d.accepts, maxHeight: d.maxHeight, tonnes: 0 })),
     stockpiles: def.stockpiles.map((s) => ({ id: s.id, name: s.name, x: s.x, z: s.z, materialType: s.materialType as "COAL_RAW", capacityT: s.capacityT, tonnes: 0, quality: null, inT: 0, outT: 0 })),
+    projects: [],
+    hoppers: [],
+    conveyors: [],
+    crews: [],
+    meeting: null,
     equipment: [],
     workers: [],
     candidates: [],
@@ -232,11 +243,13 @@ export function loadScenario(def: ScenarioDefinition, catalog: Catalog, override
     notifications: [],
     today: emptyDay(clock.day),
     history: [],
-    settings: { autoFuel: true, autoMaintenance: true, debug: false },
+    settings: { autoFuel: true, autoMaintenance: true, autoGrade: true, debug: false, coalDestination: null, morningMeeting: true },
     objectives: SLICE_OBJECTIVES.map((o) => ({ id: o.id, title: o.title, done: false })),
   };
 
   const sim = new Sim(state, catalog);
+  // Scenario-numbered roads: start generated road ids after them.
+  state.idCounters.road = state.roadEdges.length;
   rasterizeRoads(sim);
 
   for (const w of def.workers) {
@@ -281,6 +294,7 @@ export function loadScenario(def: ScenarioDefinition, catalog: Catalog, override
     eq.operatingHours = e.hours;
     eq.hoursSinceService = e.hoursSinceService;
     eq.operatorId = e.operator;
+    eq.cargoFuelL = d.cargoFuelL ?? 0;
     state.equipment.push(eq);
     const w = state.workers.find((x) => x.id === e.operator);
     if (w) w.assignedEquipmentId = eq.id;
@@ -311,7 +325,22 @@ export function loadScenario(def: ScenarioDefinition, catalog: Catalog, override
     state.samples.push(sample);
   }
 
-  for (let n = 0; n < 4; n++) state.candidates.push(generateCandidate(sim, n === 3 ? "BLASTER" : "OPERATOR"));
+  for (const c of def.crews ?? []) {
+    state.crews.push({
+      id: c.id,
+      name: c.name,
+      foremanId: c.foreman,
+      equipmentIds: c.equipment.map((name) => state.equipment.find((e) => e.name === name)?.id).filter((id): id is string => !!id),
+      workerIds: [...c.workers],
+      orders: [],
+      lastCheck: -1e6,
+      tonnesAtMeeting: 0,
+    });
+  }
+  // Day 1 starts with the first meeting: the player hands the foremen their first orders.
+  if (state.settings.morningMeeting) holdMeeting(sim);
+
+  for (let n = 0; n < 4; n++) state.candidates.push(generateCandidate(sim, n === 3 ? "BLASTER" : n === 2 ? "FOREMAN" : "OPERATOR"));
   sim.sync();
   state.rngState = sim.rng.state;
   sim.notify("info", `Welcome to ${def.mineName}`, def.description);

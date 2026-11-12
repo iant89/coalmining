@@ -1,0 +1,35 @@
+{
+  "HAUL_ROAD": {
+    "label": "Haul road",
+    "costPerM": 145,
+    "metresPerHour": 75,
+    "width": 10,
+    "speedLimitKmh": 40,
+    "maxGrade": 0.1,
+    "equipmentCategory": "DOZER",
+    "snapToNodeM": 18
+  },
+  "CONVEYOR": {
+    "label": "Overland conveyor with truck hopper",
+    "fixedCost": 95000,
+    "costPerM": 1150,
+    "hoursFixed": 16,
+    "hoursPerM": 0.09,
+    "capacityOptionsTph": [400, 800],
+    "costFactorPerTph": 0.0012,
+    "speed": 2.5,
+    "kwPerTph": 0.35,
+    "hopperCapacityT": 180,
+    "maxLengthM": 400,
+    "newStockpileCapacityT": 10000
+  },
+  "STOCKPILE": {
+    "label": "Coal stockpile pad",
+    "fixedCost": 22000,
+    "costPerT": 3.2,
+    "hoursFixed": 6,
+    "hoursPerKt": 0.8,
+    "capacityOptionsT": [5000, 10000, 20000]
+  },
+  "electricityPerKWh": 0.11
+}

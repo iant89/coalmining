@@ -102,7 +102,28 @@ function unpack(value: unknown): unknown {
 }
 
 /** saveVersion n → n+1. */
-const MIGRATIONS: Record<number, (state: Record<string, unknown>) => Record<string, unknown>> = {};
+const MIGRATIONS: Record<number, (state: Record<string, unknown>) => Record<string, unknown>> = {
+  // v2 (development phase 08): construction projects, hoppers and conveyors; road-maintenance and
+  // coal-routing settings.
+  1: (s) => {
+    const settings = (s.settings ?? {}) as Record<string, unknown>;
+    return {
+      ...s,
+      projects: s.projects ?? [],
+      hoppers: s.hoppers ?? [],
+      conveyors: s.conveyors ?? [],
+      settings: { autoGrade: true, coalDestination: null, ...settings },
+    };
+  },
+  // v3: lube and service trucks (service holds, cargo diesel, grease hours), foremen's crews and
+  // the morning meeting.
+  2: (s) => {
+    const settings = (s.settings ?? {}) as Record<string, unknown>;
+    const equipment = ((s.equipment ?? []) as Record<string, unknown>[]).map((e) => ({ serviceHold: null, cargoFuelL: 0, hoursSinceGrease: 0, ...e }));
+    const tasks = ((s.tasks ?? []) as Record<string, unknown>[]).map((t) => ({ crewId: null, ...t }));
+    return { ...s, equipment, tasks, crews: s.crews ?? [], meeting: s.meeting ?? null, settings: { morningMeeting: true, ...settings } };
+  },
+};
 
 export function migrate(state: Record<string, unknown>): SimState {
   let v = Number(state.saveVersion ?? 1);

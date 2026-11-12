@@ -50,6 +50,27 @@ URL options: `?new=1` ignores the autosave, `?seed=N` generates a different mine
 4. **Sell.** *FINANCE → SELL COAL*. Weathered coal near the outcrop is dirty — only the power
    station will take it. Deeper blocks are cleaner but cost more to uncover.
 5. **Grow.** Buy another truck, hire operators, fit upgrades, keep machines serviced.
+6. **Build logistics.** *MINE → Construction*: **BUILD HAUL ROAD** (click the start near an existing
+   road, then the end — a dozer grades it and trucks use it once it opens), **BUILD CONVEYOR** (click
+   where trucks tip into the hopper, choose the stockpile it feeds and 400 or 800 t/h), **BUILD
+   STOCKPILE**. Set *Coal routing* to the hopper and MINE COAL orders deliver to the belt; trucks
+   queue when the hopper is full. Buy a grader and it keeps worn roads above 70 % on its own.
+
+![A conveyor from a pit-side hopper to the ROM stockpile, and a new haul road](docs/images/logistics.png)
+
+7. **Run the mine through your foreman.** Every shift starts with a **morning meeting** (the game
+   pauses): Loretta Caudill reports on the pit crew (tonnes hauled, orders, breakdowns, tired
+   people). Give the crew orders in priority order — *Remove overburden*, *Mine coal*, *Strip
+   topsoil*, *Core-drill block*, *Keep haul roads graded* — and press **START THE DAY**. She turns
+   them into tasks using only the crew's machines and people, re-drills rock that did not break,
+   and waits for the overburden before mining coal. Move machines and people between crews, hire
+   another foreman from the applicants and form a second crew (*CREWS* tab, any time).
+8. **Support trucks.** The **lube truck** drives to machines that are low on diesel or overdue for
+   grease and fills them where they work (it refills at the fuel station; dry pins wear faster).
+   The **service truck** takes the mechanic out to breakdowns and does preventive services in the
+   field, so machines no longer walk to the shop.
+
+![The morning meeting: the foreman's report and the crew's orders](docs/images/meeting.png)
 
 Everything can also be done by hand: select a machine and **ASSIGN TASK** (the dialog validates
 before assignment and explains every problem).
@@ -63,7 +84,7 @@ Space pause · 1–9 speed · G geology · Esc close.
 | --- | --- |
 | `npm run dev` | Vite dev server for the game |
 | `npm run verify` | architecture lint + both typechecks + the simulation tests — run before committing |
-| `npm test` | 24 deterministic simulation tests (Node, no GPU) |
+| `npm test` | 31 deterministic simulation tests (Node, no GPU) |
 | `npm run lint:arch` | the simulation must not import the engine/DOM, use `Math.random` or read the clock |
 | `npm run check:browser` | real WebGPU in headless Chromium: plays the slice through the UI, writes `tools/shot-*.png` |
 | `npm run build` | production bundle in `dist/` |
@@ -82,6 +103,7 @@ src/sim/        the simulation — authoritative, deterministic, no engine impor
   mining/       blocks, exploration, drilling, blasting, excavation
   equipment/    data-driven catalog, movement, fuel/wear/breakdowns
   workforce/    shifts, fatigue, qualifications, payroll
+  management/   crews, foremen and their orders, the morning meeting
   logistics/    road network routing, dumps, stockpiles
   economy/ regulatory/ environment/   market, permits, safety, weather
   commands.ts   every player/developer action

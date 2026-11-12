@@ -42,7 +42,34 @@ export const TASK_CATEGORY: Record<TaskType, EquipmentCategory | null> = {
   FUEL: null,
   MAINTENANCE: null,
   REPAIR: null,
+  CONSTRUCT: null,
+  GRADE_ROAD: "GRADER",
+  FIELD_FUEL: "LUBE_TRUCK",
+  SERVICE_CALL: "SERVICE_TRUCK",
 };
+
+/**
+ * The machine category a task needs, which for some types depends on what it targets: a haul-road
+ * project is built by a dozer, a conveyor or stockpile by a contractor crew with no machine.
+ */
+export function categoryFor(sim: Sim, type: TaskType, target: TaskTarget | null | undefined): EquipmentCategory | null {
+  if (type === "CONSTRUCT") {
+    const p = target?.kind === "project" ? sim.state.projects.find((x) => x.id === target.id) : null;
+    return p?.type === "HAUL_ROAD" ? "DOZER" : null;
+  }
+  return TASK_CATEGORY[type];
+}
+
+/** Worker rule for tasks whose worker is not a machine's operator (undefined = the operator). */
+function ownWorker(sim: Sim, type: TaskType, target: TaskTarget | null | undefined): { role: WorkerRole | null; cert: string | null } | undefined {
+  if (type === "CONSTRUCT" && categoryFor(sim, type, target) === null) return { role: null, cert: null };
+  return OWN_WORKER[type];
+}
+
+/** A task that works on a conveyor rather than a machine. */
+function onConveyor(target: TaskTarget | null | undefined): boolean {
+  return target?.kind === "conveyor";
+}
 
 /** Task types that need a named machine even without a category. */
 const NEEDS_EQUIPMENT: ReadonlySet<TaskType> = new Set(["MOVE", "PARK", "FUEL", "MAINTENANCE", "REPAIR", "EXPLORE_DRILL", "DRILL_PATTERN", "STRIP_TOPSOIL", "EXCAVATE", "HAUL"]);
@@ -66,6 +93,10 @@ export const TASK_LABEL: Record<TaskType, string> = {
   FUEL: "Refuel",
   MAINTENANCE: "Scheduled maintenance",
   REPAIR: "Repair",
+  CONSTRUCT: "Construction",
+  GRADE_ROAD: "Grade haul road",
+  FIELD_FUEL: "Field refuel & grease",
+  SERVICE_CALL: "Field service",
 };
 
 export interface TaskSpec {
@@ -78,6 +109,8 @@ export interface TaskSpec {
   params?: TaskParams;
   prerequisites?: string[];
   label?: string;
+  /** Issued by this crew's foreman: only the crew's machines and people may work it. */
+  crewId?: string | null;
 }
 
 export interface ValidationResult {
@@ -87,7 +120,7 @@ export interface ValidationResult {
 
 function draft(sim: Sim, spec: TaskSpec): Task {
   const eq = sim.equipment(spec.equipmentId);
-  const own = OWN_WORKER[spec.type];
+  const own = ownWorker(sim, spec.type, spec.destination);
   const def = eq ? sim.def(eq) : null;
   return {
     id: "draft",
@@ -97,7 +130,7 @@ function draft(sim: Sim, spec: TaskSpec): Task {
     label: spec.label ?? TASK_LABEL[spec.type],
     source: spec.source ?? null,
     destination: spec.destination ?? null,
-    requiredEquipmentCategory: TASK_CATEGORY[spec.type],
+    requiredEquipmentCategory: categoryFor(sim, spec.type, spec.destination),
     assignedEquipmentId: eq?.id ?? null,
     equipmentLocked: !!eq,
     requiredWorkerRole: own ? own.role : (def?.requiredRole ?? null),
@@ -121,7 +154,12 @@ function draft(sim: Sim, spec: TaskSpec): Task {
     phase: "start",
     phaseTimer: 0,
     scratch: {},
+    crewId: spec.crewId ?? null,
   };
+}
+
+function crewOf(sim: Sim, t: Task) {
+  return t.crewId ? (sim.state.crews.find((c) => c.id === t.crewId) ?? null) : null;
 }
 
 /**
@@ -146,7 +184,7 @@ export function validateTask(sim: Sim, spec: TaskSpec): ValidationResult {
       if (cur) warnings.push(`${eq.name} is busy (${cur.label}); this task will queue behind it`);
     }
     if (spec.type !== "FUEL" && eq.fuelL / def.fuelCapacityL < 0.12) warnings.push(`${eq.name} is low on fuel (${Math.round((eq.fuelL / def.fuelCapacityL) * 100)}%)`);
-  } else if (NEEDS_EQUIPMENT.has(spec.type) && !t.requiredEquipmentCategory) {
+  } else if (NEEDS_EQUIPMENT.has(spec.type) && !t.requiredEquipmentCategory && !onConveyor(spec.destination)) {
     errors.push(`${TASK_LABEL[spec.type]} needs a machine`);
   } else if (t.requiredEquipmentCategory && !sim.state.equipment.some((e) => sim.def(e).category === t.requiredEquipmentCategory)) {
     errors.push(`The mine has no ${t.requiredEquipmentCategory.toLowerCase().replace("_", " ")}`);
@@ -221,6 +259,8 @@ export function failTask(sim: Sim, t: Task, reason: string): void {
 }
 
 function release(sim: Sim, t: Task): void {
+  // A lube or service truck's hold on the machine it was working on ends with its task.
+  for (const e of sim.state.equipment) if (e.serviceHold?.by === t.id) e.serviceHold = null;
   const eq = sim.equipment(t.assignedEquipmentId);
   if (eq && eq.currentTaskId === t.id) {
     eq.currentTaskId = null;
@@ -279,15 +319,17 @@ function pickEquipment(sim: Sim, t: Task): { eq: EquipmentInstance | null; reaso
   const cat = t.requiredEquipmentCategory;
   if (!cat) return { eq: null, reason: null };
   const p = targetPoint(sim, t.destination ?? t.source);
+  const crew = crewOf(sim, t);
   const free = sim.state.equipment
     .filter((e) => sim.def(e).category === cat && !e.currentTaskId && e.state !== "BROKEN" && e.state !== "DISABLED" && e.condition > 0)
+    .filter((e) => !e.serviceHold && (!crew || crew.equipmentIds.includes(e.id)))
     .sort((a, b) => (p ? Math.hypot(a.x - p.x, a.z - p.z) - Math.hypot(b.x - p.x, b.z - p.z) : 0));
-  if (free.length === 0) return { eq: null, reason: `No ${cat.toLowerCase().replace("_", " ")} available` };
+  if (free.length === 0) return { eq: null, reason: `No ${cat.toLowerCase().replace("_", " ")} available${crew ? ` in ${crew.name}` : ""}` };
   return { eq: free[0]!, reason: null };
 }
 
 function pickWorker(sim: Sim, t: Task, eq: EquipmentInstance | null, busy: Map<string, string>): { w: Employee | null; reason: string | null } {
-  const own = OWN_WORKER[t.type];
+  const own = ownWorker(sim, t.type, t.destination);
   const def = eq ? sim.def(eq) : null;
   const role = own ? own.role : (def?.requiredRole ?? null);
   const cert = own ? own.cert : (def?.requiredCertification ?? null);
@@ -308,11 +350,14 @@ function pickWorker(sim: Sim, t: Task, eq: EquipmentInstance | null, busy: Map<s
     const p = usable(w);
     return p ? { w: null, reason: p } : { w, reason: null };
   }
-  // The machine's regular operator first (spec §45 "Operator"), then anyone qualified.
+  // The machine's regular operator first (spec §45 "Operator"), then anyone qualified. A
+  // foreman's task is staffed from the foreman's crew only.
+  const crew = crewOf(sim, t);
+  const inCrew = (w: Employee): boolean => !crew || crew.workerIds.includes(w.id);
   const regular = !own && eq?.operatorId ? sim.worker(eq.operatorId) : null;
-  if (regular && !usable(regular)) return { w: regular, reason: null };
-  const qualified = sim.state.workers.filter((w) => !qualificationProblem(sim, w, role, cert));
-  if (qualified.length === 0) return { w: null, reason: noQualifiedMessage(t) };
+  if (regular && inCrew(regular) && !usable(regular)) return { w: regular, reason: null };
+  const qualified = sim.state.workers.filter((w) => inCrew(w) && !qualificationProblem(sim, w, role, cert));
+  if (qualified.length === 0) return { w: null, reason: crew ? `Nobody in ${crew.name} is qualified (${noQualifiedMessage(t).replace(/^No employee holds/, "needs")})` : noQualifiedMessage(t) };
   const candidates = qualified
     .filter((w) => !usable(w))
     // Prefer workers not regularly assigned to another machine, then the most skilled.
@@ -405,6 +450,15 @@ export function tickTasks(sim: Sim): void {
     }
     const eq = sim.equipment(t.assignedEquipmentId);
     const w = sim.worker(t.assignedWorkerId);
+    // A lube or service truck working on this machine: its own work waits (not a block: it is
+    // routine and short, and the player should not be told about every refuel).
+    if (eq?.serviceHold && eq.currentTaskId === t.id) {
+      t.note = eq.serviceHold.reason;
+      eq.speed = 0;
+      if (eq.state !== "BROKEN") eq.activity = "service";
+      if (w) working.add(w.id);
+      continue;
+    }
     if (eq?.evacuating && t.type !== "REPAIR") {
       blockTask(sim, t, `Holding for blast in ${sim.block(sim.state.blastHold?.blockId)?.name ?? "the pit"}`);
       continue;

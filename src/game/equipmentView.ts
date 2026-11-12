@@ -6,7 +6,7 @@
 import { Color, Material, Quat, Vec3, type Entity, type Scene } from "@forge/engine";
 import type { Sim } from "../sim/sim.js";
 import type { EquipmentInstance } from "../sim/state.js";
-import { buildDozer, buildDrill, buildExcavator, buildHaulTruck, forgetRenderables, pitch, renderableOf, yaw, type EquipmentModel, type ModelKit } from "./models.js";
+import { buildDozer, buildDrill, buildExcavator, buildGrader, buildHaulTruck, buildLubeTruck, buildServiceTruck, forgetRenderables, pitch, renderableOf, yaw, type EquipmentModel, type ModelKit } from "./models.js";
 
 interface View {
   eq: EquipmentInstance;
@@ -62,7 +62,7 @@ export class EquipmentView {
 
   private create(eq: EquipmentInstance): View {
     const def = this.sim.def(eq);
-    const builders = { HAUL_TRUCK: buildHaulTruck, EXCAVATOR: buildExcavator, DRILL: buildDrill, DOZER: buildDozer } as const;
+    const builders = { HAUL_TRUCK: buildHaulTruck, EXCAVATOR: buildExcavator, DRILL: buildDrill, DOZER: buildDozer, GRADER: buildGrader, LUBE_TRUCK: buildLubeTruck, SERVICE_TRUCK: buildServiceTruck } as const;
     const build = builders[def.category as keyof typeof builders] ?? buildHaulTruck;
     const model = build(this.scene, this.kit, `eq-${eq.id}`, def.color, def.size);
     let loadMaterial: Material | null = null;
@@ -184,6 +184,21 @@ export class EquipmentView {
         rod.transform.position = new Vec3(0, 4.0 - depth, 0.42);
         rod.transform.rotation = yaw(eq.activity === "drill" ? this.time * 8 : 0);
       }
+    } else if (cat === "GRADER" && pv.blade) {
+      // The moldboard drops to the road while grading.
+      const down = eq.activity === "push" ? 0.1 : 0.55;
+      pv.blade.transform.position = new Vec3(0, approach(pv.blade.transform.position.y, down, 4, dt), def.size.length * 0.05);
+    } else if (cat === "LUBE_TRUCK" && pv.hose) {
+      // The hose swings out to the machine while pumping, stows while driving.
+      const out = eq.activity === "fuel" && eq.state === "WORKING";
+      pv.hose.transform.rotation = yaw(out ? -0.4 + Math.sin(this.time * 0.8) * 0.05 : Math.PI / 2);
+      const n = v.model.parts.nozzle;
+      if (n) n.transform.scale = new Vec3(out ? 1.8 : 0.4, 0.1, 0.1);
+    } else if (cat === "SERVICE_TRUCK" && pv.crane && pv.boom) {
+      // Crane slews and lifts over the job while the mechanic works; folds down to drive.
+      const working = eq.activity === "service" && eq.state === "WORKING";
+      pv.crane.transform.rotation = yaw(working ? 1.2 + Math.sin(this.time * 0.3) * 0.5 : 0);
+      pv.boom.transform.rotation = pitch(working ? -0.45 + Math.sin(this.time * 0.5) * 0.1 : 0.05);
     } else if (cat === "DOZER" && pv.blade) {
       const bob = eq.activity === "push" ? Math.sin(this.time * 3) * 0.08 - 0.05 : 0.15;
       pv.blade.transform.position = new Vec3(0, 0.2 + bob, 2.6);

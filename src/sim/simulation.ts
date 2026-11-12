@@ -16,7 +16,10 @@ import { dailyMarket } from "./economy/market.js";
 import { processLab } from "./mining/exploration.js";
 import { newDayWorkforce } from "./workforce/workforce.js";
 import { updateObjectives } from "./objectives.js";
-import { wireAutomation } from "./automation.js";
+import { autoDispatch, supportDispatch, wireAutomation } from "./automation.js";
+import { tickForemen } from "./management/crews.js";
+import { holdMeeting, isShiftStart } from "./management/meeting.js";
+import { tickConveyors } from "./logistics/conveyors.js";
 
 export function emptyDay(day: number): DayStats {
   return {
@@ -63,10 +66,16 @@ export class MineSimulation {
     const minute = sim.clock.isMinuteBoundary;
     // 02–03. Weather, roads, environment.
     if (hour) hourlyEnvironment(sim);
+    // Shift start: the foremen meet (the UI pauses for it); then they make their rounds.
+    if (isShiftStart(sim) && sim.state.settings.morningMeeting) holdMeeting(sim);
+    if (minute) tickForemen(sim);
+    if (minute && Math.round(sim.clock.minute) % 10 === 0) supportDispatch(sim);
     // Blast exclusion zone clearance runs ahead of task work.
     blastClearance(sim);
     // 04–11. Workers, equipment, tasks, mining, logistics (executors drive all of these).
     tickTasks(sim);
+    // 09. Conveyors.
+    tickConveyors(sim);
     for (const e of sim.state.equipment) {
       if (e.state === "BROKEN") {
         e.stats.downMin += sim.dt;
@@ -81,7 +90,10 @@ export class MineSimulation {
     }
     // 14–18. Economy, contracts, events, notifications, statistics.
     if (minute) sim.accrue(sim.state.overheadPerDay / (24 * 60), "overhead");
-    if (hour) sim.flushAccruals();
+    if (hour) {
+      autoDispatch(sim);
+      sim.flushAccruals();
+    }
     if (sim.clock.isDayBoundary) this.endOfDay();
   }
 

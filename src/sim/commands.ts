@@ -4,7 +4,7 @@
  */
 import type { Sim } from "./sim.js";
 import type { Employee, EquipmentInstance, ExcavateMode, Task, WeatherKind } from "./state.js";
-import { createTask, TERMINAL, type TaskSpec } from "./tasks/service.js";
+import { cancelTask, createTask, TERMINAL, type TaskSpec } from "./tasks/service.js";
 import { designPattern, estimatePattern, type PatternOptions } from "./mining/drilling.js";
 import { designBlast } from "./mining/blasting.js";
 import { newEquipment } from "./scenario.js";
@@ -14,6 +14,11 @@ import { revealGeology } from "./mining/exploration.js";
 import { setWeather } from "./environment/weather.js";
 import { forceBreakdown } from "./tasks/executors.js";
 import { generateCandidate, operatorProblem } from "./workforce/workforce.js";
+import { cancelProject, planConveyorProject, planRoadProject, planStockpileProject, type ProjectEstimate } from "./logistics/construction.js";
+import { conveyorById, hopperById, setConveyorEnabled } from "./logistics/conveyors.js";
+import type { ConstructionProject, Crew, CrewOrder, CrewOrderType } from "./state.js";
+import { BLOCK_ORDERS, crewById, newOrder, ORDER_LABEL } from "./management/crews.js";
+import { endMeeting, holdMeeting } from "./management/meeting.js";
 
 export type CommandResult<T = undefined> = { ok: true; value: T; warnings?: string[] } | { ok: false; error: string };
 
@@ -56,12 +61,12 @@ export function planBlast(sim: Sim, blockId: string, chargeFactor: number) {
  * chain — drill → blast → excavate, with every truck hauling from that excavator. Steps already
  * done (pattern drilled, blast fired) are skipped.
  */
-export function orderBlockWork(sim: Sim, blockId: string, mode: ExcavateMode, opts: { excavatorId?: string; truckIds?: string[]; chargeFactor?: number; pattern?: PatternOptions } = {}): CommandResult<Task[]> {
+export function orderBlockWork(sim: Sim, blockId: string, mode: ExcavateMode, opts: { excavatorId?: string; truckIds?: string[]; chargeFactor?: number; pattern?: PatternOptions; crewId?: string | null; redrill?: boolean } = {}): CommandResult<Task[]> {
   const block = sim.block(blockId);
   if (!block) return fail("Unknown block");
   const created: Task[] = [];
   const prereq: string[] = [];
-  if (mode === "OVERBURDEN" && block.state !== "BLASTED" && block.state !== "EXCAVATING") {
+  if (mode === "OVERBURDEN" && (opts.redrill || (block.state !== "BLASTED" && block.state !== "EXCAVATING"))) {
     let pattern = sim.state.drillPatterns.find((p) => p.id === block.patternId);
     if (!pattern || (pattern.completedAt !== null && sim.state.blasts.some((b) => b.patternId === pattern!.id && b.state === "COMPLETED"))) {
       const r = planDrillPattern(sim, blockId, opts.pattern ?? { spacing: 6, burden: 6, depthMode: "TO_COAL", depth: 14 });
@@ -69,14 +74,14 @@ export function orderBlockWork(sim: Sim, blockId: string, mode: ExcavateMode, op
       pattern = r.value.pattern;
     }
     if (pattern.completedAt === null) {
-      const d = assignTask(sim, { type: "DRILL_PATTERN", destination: { kind: "block", id: blockId }, params: { patternId: pattern.id }, label: `Drill ${block.name}` });
+      const d = assignTask(sim, { type: "DRILL_PATTERN", destination: { kind: "block", id: blockId }, params: { patternId: pattern.id }, crewId: opts.crewId ?? null, label: `Drill ${block.name}` });
       if (!d.ok) return d;
       created.push(d.value);
       prereq.push(d.value.id);
     }
     const blastR = planBlast(sim, blockId, opts.chargeFactor ?? 1);
     if (!blastR.ok) return blastR;
-    const b = assignTask(sim, { type: "BLAST", destination: { kind: "block", id: blockId }, params: { blastId: blastR.value.id }, prerequisites: [...prereq], label: `Blast ${block.name}` });
+    const b = assignTask(sim, { type: "BLAST", destination: { kind: "block", id: blockId }, params: { blastId: blastR.value.id }, prerequisites: [...prereq], crewId: opts.crewId ?? null, label: `Blast ${block.name}` });
     if (!b.ok) return b;
     created.push(b.value);
     prereq.splice(0, prereq.length, b.value.id);
@@ -87,17 +92,23 @@ export function orderBlockWork(sim: Sim, blockId: string, mode: ExcavateMode, op
     destination: { kind: "block", id: blockId },
     params: { mode },
     prerequisites: [...prereq],
+    crewId: opts.crewId ?? null,
     label: `${mode === "COAL" ? "Mine coal" : "Remove overburden"}: ${block.name}`,
   });
   if (!ex.ok) return ex;
   created.push(ex.value);
   const trucks = opts.truckIds ?? sim.state.equipment.filter((e) => sim.def(e).category === "HAUL_TRUCK" && !e.currentTaskId).map((e) => e.id);
+  // Coal goes where the mine's coal routing says: a stockpile, or a conveyor hopper.
+  const dest = sim.state.settings.coalDestination;
+  const coalParams = hopperById(sim, dest) ? { coalHopperId: dest! } : sim.stockpile(dest) ? { coalStockpileId: dest! } : {};
   for (const id of trucks) {
     const h = assignTask(sim, {
       type: "HAUL",
       equipmentId: id,
+      params: mode === "COAL" ? coalParams : {},
       source: { kind: "task", id: ex.value.id },
       prerequisites: [...prereq],
+      crewId: opts.crewId ?? null,
       label: `Haul ${mode === "COAL" ? "coal" : "overburden"} from ${block.name}`,
     });
     if (h.ok) created.push(h.value);
@@ -113,6 +124,7 @@ export function buyEquipment(sim: Sim, defId: string): CommandResult<EquipmentIn
   const n = sim.state.equipment.filter((e) => e.defId === defId).length + 1;
   const eq = newEquipment(sim.nextId("eq"), defId, `${def.model} #${n}`, lot ? lot.x + lot.width / 2 - 6 : 0, lot ? lot.z + lot.depth / 2 + 6 : 0, Math.PI, def.fuelCapacityL);
   eq.purchasedDay = sim.day;
+  eq.cargoFuelL = def.cargoFuelL ?? 0;
   sim.state.equipment.push(eq);
   sim.spend(def.purchasePrice, "equipment", `Purchased ${def.name}`);
   sim.bus.emit({ type: "EquipmentPurchased", equipmentId: eq.id });
@@ -166,7 +178,7 @@ export function hireCandidate(sim: Sim, candidateId: string): CommandResult<Empl
   const c = sim.state.candidates.splice(i, 1)[0]!;
   c.hiredDay = sim.day;
   sim.state.workers.push(c);
-  sim.state.candidates.push(generateCandidate(sim, sim.rng.chance(0.2) ? "BLASTER" : sim.rng.chance(0.15) ? "MECHANIC" : "OPERATOR"));
+  sim.state.candidates.push(generateCandidate(sim, sim.rng.chance(0.2) ? "BLASTER" : sim.rng.chance(0.15) ? "MECHANIC" : sim.rng.chance(0.12) ? "FOREMAN" : "OPERATOR"));
   sim.bus.emit({ type: "WorkerHired", workerId: c.id });
   sim.notify("good", `${c.name} hired`, `$${c.wagePerHour}/h. Certifications: ${c.certifications.map((x) => x.type).join(", ") || "none"}.`, { kind: "worker", id: c.id });
   return ok(c);
@@ -177,6 +189,10 @@ export function dismissWorker(sim: Sim, workerId: string): CommandResult<undefin
   if (!w) return fail("Unknown employee");
   if (sim.state.tasks.some((t) => t.assignedWorkerId === w.id && !TERMINAL.has(t.status) && t.status !== "QUEUED")) return fail(`${w.name} is working a task; reassign it first`);
   w.employmentStatus = "TERMINATED";
+  for (const c of sim.state.crews) {
+    c.workerIds = c.workerIds.filter((id) => id !== w.id);
+    if (c.foremanId === w.id) c.foremanId = null;
+  }
   for (const e of sim.state.equipment) if (e.operatorId === w.id) e.operatorId = null;
   w.assignedEquipmentId = null;
   return ok(undefined);
@@ -203,6 +219,189 @@ export function trainCertification(sim: Sim, workerId: string, cert: string): Co
   const expires = cert === "BLASTER" ? sim.day + 365 : null;
   if (c) c.expiresDay = expires;
   else w.certifications.push({ type: cert, expiresDay: expires });
+  return ok(undefined);
+}
+
+// ---------------------------------------------------------------- construction & logistics (spec §22–24, §63)
+
+function startProject(sim: Sim, r: { project: ConstructionProject; estimate: ProjectEstimate } | { problems: string[] }, equipmentId?: string | null): CommandResult<{ project: ConstructionProject; task: Task; estimate: ProjectEstimate }> {
+  if ("problems" in r) return fail(r.problems.join("; "));
+  const t = assignTask(sim, { type: "CONSTRUCT", equipmentId: equipmentId ?? null, destination: { kind: "project", id: r.project.id }, label: `Build ${r.project.name}` });
+  if (!t.ok) {
+    r.project.status = "CANCELLED";
+    return t;
+  }
+  sim.notify("info", `${r.project.name} planned`, `$${r.estimate.cost.toLocaleString()}, about ${Math.round(r.estimate.workMinutes / 60)} h of work. Paid as the work is done.`);
+  return ok({ project: r.project, task: t.value, estimate: r.estimate }, r.estimate.warnings);
+}
+
+/** Plan a haul road and order a dozer to build it. */
+export function buildRoad(sim: Sim, from: { x: number; z: number }, to: { x: number; z: number }, dozerId?: string | null) {
+  return startProject(sim, planRoadProject(sim, { from, to }), dozerId);
+}
+
+/** Plan a hopper + conveyor feeding `stockpileId` (or a new stockpile at `to`) and hire the crew. */
+export function buildConveyor(sim: Sim, from: { x: number; z: number }, to: { x: number; z: number }, capacityTph: number, stockpileId: string | null) {
+  return startProject(sim, planConveyorProject(sim, from, to, capacityTph, stockpileId));
+}
+
+export function buildStockpile(sim: Sim, at: { x: number; z: number }, capacityT: number) {
+  return startProject(sim, planStockpileProject(sim, at, capacityT));
+}
+
+export function cancelConstruction(sim: Sim, projectId: string): CommandResult<undefined> {
+  const e = cancelProject(sim, projectId);
+  if (e) return fail(e);
+  for (const t of sim.state.tasks) if (t.type === "CONSTRUCT" && t.destination?.kind === "project" && t.destination.id === projectId) cancelTask(sim, t.id, "Project cancelled");
+  return ok(undefined);
+}
+
+export function switchConveyor(sim: Sim, conveyorId: string, on: boolean): CommandResult<undefined> {
+  const c = conveyorById(sim, conveyorId);
+  if (!c) return fail("Unknown conveyor");
+  if (on && (c.state === "DAMAGED" || c.state === "MAINTENANCE")) return fail(`${c.name} is ${c.state === "DAMAGED" ? "broken down" : "under repair"}`);
+  setConveyorEnabled(sim, c, on);
+  return ok(undefined);
+}
+
+export function repairConveyorTask(sim: Sim, conveyorId: string): CommandResult<Task> {
+  const c = conveyorById(sim, conveyorId);
+  if (!c) return fail("Unknown conveyor");
+  return assignTask(sim, { type: "REPAIR", destination: { kind: "conveyor", id: c.id }, priority: "HIGH", label: `Repair ${c.name}` });
+}
+
+/** Where MINE COAL orders send coal: a stockpile or hopper id, or null for the default stockpile. */
+export function setCoalDestination(sim: Sim, id: string | null): CommandResult<undefined> {
+  if (id !== null && !sim.stockpile(id) && !hopperById(sim, id)) return fail("Unknown stockpile or hopper");
+  sim.state.settings.coalDestination = id;
+  return ok(undefined);
+}
+
+export function gradeRoad(sim: Sim, roadId: string, graderId?: string | null): CommandResult<Task> {
+  const r = sim.state.roadEdges.find((e) => e.id === roadId);
+  if (!r) return fail("Unknown road");
+  return assignTask(sim, { type: "GRADE_ROAD", equipmentId: graderId ?? null, destination: { kind: "road", id: r.id }, label: `Grade road ${r.a} → ${r.b}` });
+}
+
+// ---------------------------------------------------------------- crews, foremen and the morning meeting
+
+/** Form a crew around a foreman. */
+export function createCrew(sim: Sim, foremanId: string, name?: string): CommandResult<Crew> {
+  const f = sim.worker(foremanId);
+  if (!f || f.employmentStatus === "TERMINATED") return fail("Unknown employee");
+  if (f.role !== "FOREMAN") return fail(`${f.name} is not a foreman. Hire one from the applicant pool`);
+  if (sim.state.crews.some((c) => c.foremanId === f.id)) return fail(`${f.name} already leads a crew`);
+  for (const c of sim.state.crews) c.workerIds = c.workerIds.filter((id) => id !== f.id);
+  const crew: Crew = { id: sim.nextId("crew"), name: name ?? `${f.name.split(" ")[0]}'s crew`, foremanId: f.id, equipmentIds: [], workerIds: [], orders: [], lastCheck: -1e6, tonnesAtMeeting: 0 };
+  sim.state.crews.push(crew);
+  return ok(crew);
+}
+
+/** Disband a crew: its machines and people become the player's to direct; its orders lapse. */
+export function disbandCrew(sim: Sim, crewId: string): CommandResult<undefined> {
+  const crew = crewById(sim, crewId);
+  if (!crew) return fail("Unknown crew");
+  for (const o of crew.orders) for (const id of o.taskIds) cancelTask(sim, id, `${crew.name} disbanded`);
+  sim.state.crews = sim.state.crews.filter((c) => c !== crew);
+  return ok(undefined);
+}
+
+export function setCrewForeman(sim: Sim, crewId: string, foremanId: string | null): CommandResult<undefined> {
+  const crew = crewById(sim, crewId);
+  if (!crew) return fail("Unknown crew");
+  if (foremanId) {
+    const f = sim.worker(foremanId);
+    if (!f || f.role !== "FOREMAN") return fail("Only a foreman can lead a crew");
+    const other = sim.state.crews.find((c) => c.foremanId === foremanId && c !== crew);
+    if (other) return fail(`${f.name} already leads ${other.name}`);
+  }
+  crew.foremanId = foremanId;
+  crew.lastCheck = -1e6;
+  return ok(undefined);
+}
+
+/** Move a machine or an employee into a crew (or out of all crews with `crewId` null). */
+export function assignToCrew(sim: Sim, crewId: string | null, member: { equipmentId?: string; workerId?: string }): CommandResult<undefined> {
+  const crew = crewId ? crewById(sim, crewId) : null;
+  if (crewId && !crew) return fail("Unknown crew");
+  if (member.equipmentId) {
+    const e = sim.equipment(member.equipmentId);
+    if (!e) return fail("Unknown equipment");
+    for (const c of sim.state.crews) c.equipmentIds = c.equipmentIds.filter((id) => id !== e.id);
+    crew?.equipmentIds.push(e.id);
+  }
+  if (member.workerId) {
+    const w = sim.worker(member.workerId);
+    if (!w || w.employmentStatus === "TERMINATED") return fail("Unknown employee");
+    if (w.role === "FOREMAN") return fail(`${w.name} is a foreman: make them lead a crew instead`);
+    for (const c of sim.state.crews) c.workerIds = c.workerIds.filter((id) => id !== w.id);
+    crew?.workerIds.push(w.id);
+  }
+  return ok(undefined);
+}
+
+export function addCrewOrder(sim: Sim, crewId: string, type: CrewOrderType, blockId: string | null = null): CommandResult<CrewOrder> {
+  const crew = crewById(sim, crewId);
+  if (!crew) return fail("Unknown crew");
+  if (!ORDER_LABEL[type]) return fail("Unknown order");
+  if (BLOCK_ORDERS.has(type)) {
+    const b = sim.block(blockId);
+    if (!b) return fail("Choose a block for the order");
+    if (crew.orders.some((o) => o.type === type && o.blockId === b.id && o.status !== "DONE")) return fail(`${crew.name} already has that order`);
+  } else {
+    if (crew.orders.some((o) => o.type === type && o.status !== "DONE")) return fail(`${crew.name} already has that order`);
+    blockId = null;
+  }
+  const o = newOrder(sim, type, blockId);
+  crew.orders.push(o);
+  // The foreman looks at the new order on the next round, not in half an hour.
+  crew.lastCheck = -1e6;
+  return ok(o);
+}
+
+export function removeCrewOrder(sim: Sim, crewId: string, orderId: string): CommandResult<undefined> {
+  const crew = crewById(sim, crewId);
+  const o = crew?.orders.find((x) => x.id === orderId);
+  if (!crew || !o) return fail("Unknown order");
+  for (const id of o.taskIds) cancelTask(sim, id, `Order withdrawn from ${crew.name}`);
+  crew.orders = crew.orders.filter((x) => x !== o);
+  return ok(undefined);
+}
+
+/** Raise (-1) or lower (+1) an order's priority. */
+export function moveCrewOrder(sim: Sim, crewId: string, orderId: string, delta: -1 | 1): CommandResult<undefined> {
+  const crew = crewById(sim, crewId);
+  const i = crew ? crew.orders.findIndex((x) => x.id === orderId) : -1;
+  if (!crew || i < 0) return fail("Unknown order");
+  const j = i + delta;
+  if (j < 0 || j >= crew.orders.length) return ok(undefined);
+  [crew.orders[i], crew.orders[j]] = [crew.orders[j]!, crew.orders[i]!];
+  crew.lastCheck = -1e6;
+  return ok(undefined);
+}
+
+/** Forget finished orders. */
+export function clearDoneOrders(sim: Sim, crewId: string): CommandResult<undefined> {
+  const crew = crewById(sim, crewId);
+  if (!crew) return fail("Unknown crew");
+  crew.orders = crew.orders.filter((o) => o.status !== "DONE");
+  return ok(undefined);
+}
+
+/** Call a meeting now (the UI pauses for it). */
+export function callMeeting(sim: Sim): CommandResult<undefined> {
+  holdMeeting(sim);
+  return ok(undefined);
+}
+
+/** "Start the day": the meeting ends and the foremen go out with their orders. */
+export function closeMeeting(sim: Sim): CommandResult<undefined> {
+  endMeeting(sim);
+  return ok(undefined);
+}
+
+export function setMorningMeeting(sim: Sim, on: boolean): CommandResult<undefined> {
+  sim.state.settings.morningMeeting = on;
   return ok(undefined);
 }
 

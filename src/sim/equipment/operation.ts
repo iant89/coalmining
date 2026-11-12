@@ -26,6 +26,9 @@ const BREAKDOWN_CAUSES: Record<string, string[]> = {
   DOZER: ["final drive failure", "track roller seizure", "blade lift cylinder leak", "engine overheating"],
 };
 
+/** Operating hours a machine runs between greasings before wear picks up. */
+export const GREASE_INTERVAL_H = 60;
+
 /** Payload capacity (t) for a material, with upgrades. */
 export function payloadCapacity(sim: Sim, eq: EquipmentInstance, material: MaterialType | null): number {
   const def = sim.def(eq);
@@ -56,6 +59,7 @@ export function runEngine(sim: Sim, eq: EquipmentInstance, minutes: number, load
   sim.state.today.fuelL += used;
   eq.operatingHours += hours;
   eq.hoursSinceService += hours;
+  eq.hoursSinceGrease += hours;
   sim.accrue(def.operatingCostPerHour * hours * (0.4 + 0.6 * load), "operating");
   if (load > 0.05) {
     eq.stats.workingMin += minutes;
@@ -67,7 +71,9 @@ export function runEngine(sim: Sim, eq: EquipmentInstance, minutes: number, load
   // Wear: load, operator care, overdue service and upgrades all scale it.
   const overdue = eq.hoursSinceService > def.maintenanceIntervalH ? 1.8 : 1;
   const care = 1.25 - 0.5 * operatorSkill;
-  const wear = def.wearPerHour * hours * (0.3 + 0.7 * load) * care * overdue * sim.catalog.modifier(eq.upgrades, "wear");
+  // Pins and bushings run dry without regular greasing (lube truck rounds, or a service).
+  const dry = eq.hoursSinceGrease > GREASE_INTERVAL_H ? 1.15 : 1;
+  const wear = def.wearPerHour * hours * (0.3 + 0.7 * load) * care * overdue * dry * sim.catalog.modifier(eq.upgrades, "wear");
   eq.condition = Math.max(0, eq.condition - wear);
   // Breakdown hazard per working minute.
   if (load > 0.05) {

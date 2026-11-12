@@ -14,6 +14,8 @@ import { completeHole, holeMinutes, patternProgress } from "../mining/drilling.j
 import { BLAST_EXCLUSION_M, executeBlast } from "../mining/blasting.js";
 import { CORE_COST_PER_M, recordCoreSample } from "../mining/exploration.js";
 import { addToStockpile, dumpPoint, placeInDump } from "../logistics/stockpiles.js";
+import { alongPath, workOnProject } from "../logistics/construction.js";
+import { addToHopper, conveyorById, finishConveyorRepair, hopperById, repairConveyorHours } from "../logistics/conveyors.js";
 import { haulClass, MATERIAL_LABEL, mergeParcel, surfaceMaterialIsRock } from "./helpers.js";
 import { mineralRightsProblem, permitProblem } from "../regulatory/permits.js";
 import { weatherEffects } from "../environment/weather.js";
@@ -73,6 +75,24 @@ export function targetPoint(sim: Sim, target: TaskTarget | null): { x: number; z
       const e = sim.equipment(target.id);
       return e ? { x: e.x, z: e.z } : null;
     }
+    case "road": {
+      const e = sim.state.roadEdges.find((r) => r.id === target.id);
+      const n = e ? sim.state.roadNodes.find((x) => x.id === e.a) : null;
+      return n ? { x: n.x, z: n.z } : null;
+    }
+    case "project": {
+      const p = sim.state.projects.find((x) => x.id === target.id);
+      return p ? alongPath(p, p.progress) : null;
+    }
+    case "conveyor": {
+      const c = conveyorById(sim, target.id);
+      const h = c ? hopperById(sim, c.hopperId) : null;
+      return h ? { x: h.x, z: h.z } : null;
+    }
+    case "hopper": {
+      const h = hopperById(sim, target.id);
+      return h ? { x: h.x, z: h.z } : null;
+    }
   }
 }
 
@@ -115,6 +135,8 @@ function idle(sim: Sim, eq: EquipmentInstance, minutes: number, w: Employee | nu
  */
 function fieldFuel(sim: Sim, t: Task, eq: EquipmentInstance, budget: number): number {
   const def = sim.def(eq);
+  // With a lube truck on site it makes the rounds (FIELD_FUEL); no contractor bowser is called.
+  if (t.scratch.fueling !== 1 && eq.fuelL / def.fuelCapacityL > 0.05 && sim.state.equipment.some((e) => sim.def(e).category === "LUBE_TRUCK" && e.state !== "BROKEN")) return budget;
   const low = eq.fuelL / def.fuelCapacityL < 0.15;
   if (t.scratch.fueling !== 1 && !(low && sim.state.settings.autoFuel)) return budget;
   if (t.scratch.fueling !== 1) {
@@ -302,6 +324,7 @@ const MAINTENANCE: TaskExecutor = {
     if (t.phaseTimer >= total) {
       eq.condition = Math.min(100, eq.condition + 18);
       eq.hoursSinceService = 0;
+      eq.hoursSinceGrease = 0;
       sim.spend(def.maintenanceCost, "maintenance", `Scheduled service: ${eq.name}`);
       sim.notify("good", `${eq.name} serviced`, `Condition now ${eq.condition.toFixed(0)}%.`, { kind: "equipment", id: eq.id });
       completeTask(sim, t);
@@ -309,8 +332,32 @@ const MAINTENANCE: TaskExecutor = {
   },
 };
 
+/** Conveyor repairs: a mechanic, no machine. */
+function repairConveyor(sim: Sim, t: Task, w: Employee | null, budget: number): void {
+  const c = conveyorById(sim, t.destination?.kind === "conveyor" ? t.destination.id : null);
+  if (!c) return failTask(sim, t, "The conveyor no longer exists");
+  if (c.state !== "DAMAGED" && c.state !== "MAINTENANCE" && t.phaseTimer === 0 && c.condition > 40) return completeTask(sim, t);
+  c.state = "MAINTENANCE";
+  t.status = "EXECUTING";
+  const skill = perf(w, "maintenance");
+  const total = 15 + repairConveyorHours(c) * 60 * (1.3 - 0.5 * skill);
+  t.phaseTimer += budget;
+  t.note = t.phaseTimer < 15 ? "Mechanic walking the belt" : `Repairing: ${c.breakdown?.cause ?? "overhaul"}`;
+  t.progress = Math.min(1, t.phaseTimer / total);
+  t.estimatedDuration = Math.max(0, total - t.phaseTimer);
+  if (t.phaseTimer >= total) {
+    finishConveyorRepair(sim, c, skill);
+    completeTask(sim, t);
+  }
+}
+
 const REPAIR: TaskExecutor = {
   validate(sim, t) {
+    if (t.destination?.kind === "conveyor") {
+      const c = conveyorById(sim, t.destination.id);
+      if (!c) return ["Unknown conveyor"];
+      return c.state === "DAMAGED" || c.condition < 60 ? [] : [`${c.name} does not need a repair (condition ${c.condition.toFixed(0)}%)`];
+    }
     const eq = sim.equipment(t.assignedEquipmentId);
     if (!eq) return ["Choose the machine to repair"];
     return eq.state === "BROKEN" || eq.condition <= 0 ? [] : [`${eq.name} is not broken down`];
@@ -321,6 +368,7 @@ const REPAIR: TaskExecutor = {
     if (eq) t.estimatedDuration = 20 + repairHours(sim, eq) * 60;
   },
   run(sim, t, eq, w, budget) {
+    if (t.destination?.kind === "conveyor") return repairConveyor(sim, t, w, budget);
     if (!eq) return;
     if (eq.state !== "BROKEN" && eq.condition > 0) return completeTask(sim, t);
     t.status = "EXECUTING";
@@ -622,7 +670,7 @@ export function blastClearance(sim: Sim): void {
 
 // ---------------------------------------------------------------- STRIP_TOPSOIL (dozer)
 
-function topsoilCells(sim: Sim, block: MiningBlock): number[] {
+export function topsoilCells(sim: Sim, block: MiningBlock): number[] {
   const t = sim.terrain;
   const g = sim.state.geology;
   const out: number[] = [];
@@ -922,8 +970,14 @@ function finishExcavation(sim: Sim, t: Task, block: MiningBlock): void {
 
 // ---------------------------------------------------------------- HAUL
 
-function haulDestination(sim: Sim, t: Task, truck: EquipmentInstance): { kind: "dump" | "stockpile"; id: string; x: number; z: number } | string {
+function haulDestination(sim: Sim, t: Task, truck: EquipmentInstance): { kind: "dump" | "stockpile" | "hopper"; id: string; x: number; z: number } | string {
   const cls = truck.payload ? haulClass(truck.payload.type) : "SPOIL";
+  if (cls === "COAL" && t.params.coalHopperId) {
+    const h = hopperById(sim, t.params.coalHopperId);
+    if (!h) return "The hopper for this haul no longer exists";
+    // Trucks back up to the hopper's tipping side.
+    return { kind: "hopper", id: h.id, x: h.x - 7, z: h.z };
+  }
   if (cls === "COAL") {
     const s = sim.stockpile(t.params.coalStockpileId);
     if (!s) return "No coal stockpile set for this haul";
@@ -1087,17 +1141,40 @@ const HAUL: TaskExecutor = {
           if (typeof dest === "string") return blockTask(sim, t, dest);
           const parcel = eq.payload!;
           let rest = 0;
-          if (dest.kind === "stockpile") rest = addToStockpile(sim, sim.stockpile(dest.id)!, parcel);
+          if (dest.kind === "hopper") {
+            const h = hopperById(sim, dest.id)!;
+            const c = conveyorById(sim, h.conveyorId);
+            rest = addToHopper(h, parcel);
+            // Coal is accounted to the gram: any remainder stays on the truck until it fits.
+            if (rest > 1e-9) {
+              // A full hopper is normal operation: tip what fits and wait for the belt to draw it down.
+              if (rest < parcel.tonnes - 0.01) {
+                sim.bus.emit({ type: "MaterialDumped", equipmentId: eq.id, material: parcel.type, tonnes: parcel.tonnes - rest, destination: h.id });
+                t.materialAmount += parcel.tonnes - rest;
+                eq.stats.tonnesMoved += parcel.tonnes - rest;
+              }
+              eq.payload = { ...parcel, tonnes: rest };
+              t.phaseTimer = total;
+              if (!c || c.state === "DAMAGED" || c.state === "MAINTENANCE" || !c.enabled) {
+                return blockTask(sim, t, `${h.name} is full and ${c?.name ?? "its conveyor"} is ${!c ? "gone" : !c.enabled ? "switched off" : "down"}`);
+              }
+              t.note = `Waiting for space in ${h.name} (${Math.round(h.tonnes)}/${h.capacityT} t)`;
+              eq.state = "WAITING";
+              eq.activity = "idle";
+              idle(sim, eq, left, w);
+              return;
+            }
+          } else if (dest.kind === "stockpile") rest = addToStockpile(sim, sim.stockpile(dest.id)!, parcel);
           else rest = placeInDump(sim, sim.dump(dest.id)!, parcel, eq.x, eq.z);
           const dumped = parcel.tonnes - rest;
           sim.bus.emit({ type: "MaterialDumped", equipmentId: eq.id, material: parcel.type, tonnes: dumped, destination: dest.id });
           t.materialAmount += dumped;
           eq.stats.tonnesMoved += dumped;
-          if (rest > 0.5) {
+          if (rest > 0.5 || (dest.kind === "stockpile" && rest > 1e-9)) {
             eq.payload = { ...parcel, tonnes: rest };
             delete t.scratch.dumpK;
             t.phaseTimer = total;
-            const name = dest.kind === "stockpile" ? sim.stockpile(dest.id)!.name : sim.dump(dest.id)!.name;
+            const name = dest.kind === "stockpile" ? sim.stockpile(dest.id)!.name : dest.kind === "hopper" ? hopperById(sim, dest.id)!.name : sim.dump(dest.id)!.name;
             return blockTask(sim, t, `${name} is full: ${Math.round(rest)} t of ${MATERIAL_LABEL[parcel.type].toLowerCase()} still on board`);
           }
           eq.payload = null;
@@ -1138,6 +1215,348 @@ const HAUL: TaskExecutor = {
   },
 };
 
+// ---------------------------------------------------------------- CONSTRUCT (spec §63)
+
+function projectOf(sim: Sim, t: Task) {
+  return t.destination?.kind === "project" ? (sim.state.projects.find((p) => p.id === (t.destination as { id: string }).id) ?? null) : null;
+}
+
+/** Contractor crews work the day shift, like the mine. */
+function crewOnSite(sim: Sim): boolean {
+  const { startHour, lengthHours } = sim.state.shift;
+  const h = sim.clock.hourOfDay;
+  const end = startHour + lengthHours;
+  return end <= 24 ? h >= startHour && h < end : h >= startHour || h < end - 24;
+}
+
+const CONSTRUCT: TaskExecutor = {
+  validate(sim, t) {
+    const p = projectOf(sim, t);
+    if (!p) return ["Choose a construction project"];
+    if (p.status === "COMPLETE") return [`${p.name} is already complete`];
+    if (p.status === "CANCELLED") return [`${p.name} was cancelled`];
+    const other = sim.state.tasks.find((x) => x !== t && x.type === "CONSTRUCT" && x.destination?.kind === "project" && x.destination.id === p.id && !TERMINAL.has(x.status));
+    if (other && t.id !== "draft" && other.createdAt < t.createdAt) return [`${p.name} is already being built (${other.id})`];
+    if (other && t.id === "draft") return [`${p.name} is already being built (${other.id})`];
+    return [];
+  },
+  check(sim, t) {
+    const p = projectOf(sim, t);
+    return p && p.status === "CANCELLED" ? `${p.name} was cancelled` : null;
+  },
+  start(_sim, t, eq) {
+    t.phase = eq ? "travel" : "work";
+  },
+  run(sim, t, eq, w, budget) {
+    const p = projectOf(sim, t);
+    if (!p || p.status === "CANCELLED") return failTask(sim, t, "The project was cancelled");
+    t.estimatedDuration = Math.max(0, (1 - p.progress) * p.workMinutes);
+    if (!eq) {
+      // Contractor crew: day shift only.
+      t.status = "EXECUTING";
+      if (!crewOnSite(sim)) {
+        t.note = `Contractor crew off site until ${String(sim.state.shift.startHour).padStart(2, "0")}:00`;
+        return;
+      }
+      t.note = "Contractor crew on site";
+      if (workOnProject(sim, p, budget, 1)) completeTask(sim, t);
+      t.progress = p.progress;
+      return;
+    }
+    let left = fieldFuel(sim, t, eq, budget);
+    if (left <= EPS) return;
+    if (t.phase === "travel") {
+      const at = alongPath(p, p.progress);
+      eq.activity = "drive";
+      eq.state = "TRAVELING";
+      t.status = "TRAVELING";
+      const r = goTo(sim, t, eq, at.x, at.z, w, left, 3);
+      left = r.left;
+      if (!r.arrived) return;
+      t.phase = "work";
+    }
+    t.status = "EXECUTING";
+    eq.state = "WORKING";
+    eq.activity = "push";
+    t.note = null;
+    const rate = (0.7 + 0.45 * perf(w, "equipmentOperation")) * (eq.condition < 40 ? 0.8 : 1);
+    runEngine(sim, eq, left, 0.9, w?.skills.equipmentOperation);
+    if (isBroken(eq)) return;
+    const done = workOnProject(sim, p, left, rate);
+    // The dozer works its way along the alignment.
+    const at = alongPath(p, p.progress);
+    const a = p.path[0]!;
+    const b = p.path[p.path.length - 1]!;
+    eq.heading = Math.atan2(b.x - a.x, b.z - a.z);
+    eq.x = at.x;
+    eq.z = at.z;
+    t.progress = p.progress;
+    if (done) completeTask(sim, t);
+  },
+};
+
+// ---------------------------------------------------------------- GRADE_ROAD (spec §22)
+
+const GRADE_ROAD: TaskExecutor = {
+  validate(sim, t) {
+    if (t.destination?.kind !== "road") return ["Choose a haul road"];
+    const id = t.destination.id;
+    return sim.state.roadEdges.some((e) => e.id === id) ? [] : ["Unknown haul road"];
+  },
+  start(_sim, t) {
+    t.phase = "to-start";
+  },
+  run(sim, t, eq, w, budget) {
+    if (!eq) return;
+    const edge = sim.state.roadEdges.find((e) => e.id === (t.destination as { id: string }).id);
+    const a = edge ? sim.state.roadNodes.find((n) => n.id === edge.a) : null;
+    const b = edge ? sim.state.roadNodes.find((n) => n.id === edge.b) : null;
+    if (!edge || !a || !b) return failTask(sim, t, "The road no longer exists");
+    const def = sim.def(eq);
+    let left = budget;
+    if (t.phase === "to-start") {
+      eq.activity = "drive";
+      eq.state = "TRAVELING";
+      t.status = "TRAVELING";
+      const r = goTo(sim, t, eq, a.x, a.z, w, left, 2);
+      left = r.left;
+      if (!r.arrived) return;
+      t.phase = "grade";
+      t.scratch.startCondition = edge.condition;
+      t.scratch.restore = (def.gradeRestore ?? 50) * (0.7 + 0.5 * perf(w, "equipmentOperation"));
+      setDirect(eq, b.x, b.z, def.gradeSpeedKmh ?? 7);
+    }
+    t.status = "EXECUTING";
+    eq.state = "WORKING";
+    eq.activity = "push";
+    t.note = `Grading ${a.id} → ${b.id}`;
+    if (arrived(eq)) setDirect(eq, b.x, b.z, def.gradeSpeedKmh ?? 7);
+    travel(sim, eq, left, w);
+    const len = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+    const done = 1 - Math.min(1, Math.hypot(b.x - eq.x, b.z - eq.z) / len);
+    t.progress = done;
+    // Condition comes back as the blade passes, not all at once at the end.
+    edge.condition = Math.min(100, Math.max(edge.condition, (t.scratch.startCondition ?? edge.condition) + (t.scratch.restore ?? 50) * done));
+    if (arrived(eq) && Math.hypot(b.x - eq.x, b.z - eq.z) < 1) {
+      sim.notify("good", `Road ${a.id} → ${b.id} graded`, `Condition now ${edge.condition.toFixed(0)}%.`);
+      completeTask(sim, t);
+    }
+  },
+};
+
+// ---------------------------------------------------------------- FIELD_FUEL (lube truck)
+
+function targetEquipment(sim: Sim, t: Task): EquipmentInstance | null {
+  return t.destination?.kind === "equipment" ? sim.equipment(t.destination.id) : null;
+}
+
+/** Side-by-side distance that keeps a support truck clear of a machine's swing and its own body. */
+function clearance(sim: Sim, target: EquipmentInstance, truck: EquipmentInstance): number {
+  const t = sim.def(target).size;
+  return Math.max(t.length, t.width) / 2 + sim.def(truck).size.width / 2 + 2;
+}
+
+/** Park beside a machine: a point a few metres off its side, re-aimed as the machine moves. */
+function besidePoint(target: EquipmentInstance, offset: number): { x: number; z: number } {
+  return { x: target.x + Math.cos(target.heading) * offset, z: target.z - Math.sin(target.heading) * offset };
+}
+
+const FIELD_FUEL: TaskExecutor = {
+  validate(sim, t) {
+    const target = targetEquipment(sim, t);
+    if (!target) return ["Choose the machine to refuel"];
+    if (sim.def(target).category === "LUBE_TRUCK") return ["A lube truck refills at the fuel station"];
+    return [];
+  },
+  start(_sim, t) {
+    t.phase = "plan";
+  },
+  run(sim, t, eq, w, budget) {
+    if (!eq) return;
+    const target = targetEquipment(sim, t);
+    if (!target) return failTask(sim, t, "The machine no longer exists");
+    const def = sim.def(eq);
+    const tdef = sim.def(target);
+    const cargoCap = def.cargoFuelL ?? 8000;
+    const pump = def.pumpLpm ?? 200;
+    let left = budget;
+    for (let guard = 0; guard < 8 && left > EPS; guard++) {
+      switch (t.phase) {
+        case "plan": {
+          const need = tdef.fuelCapacityL - target.fuelL;
+          const ownLow = eq.fuelL / def.fuelCapacityL < 0.3;
+          t.phase = ownLow || eq.cargoFuelL < Math.min(need, cargoCap * 0.3) ? "to-depot" : "to-target";
+          continue;
+        }
+        case "to-depot": {
+          const f = sim.facilityOfType("FUEL", eq.x, eq.z);
+          if (!f) return blockTask(sim, t, `${eq.name} needs a fuel station to fill its tank`);
+          eq.activity = "drive";
+          eq.state = "TRAVELING";
+          t.status = "TRAVELING";
+          t.note = "Filling the tank at the fuel station";
+          const r = goTo(sim, t, eq, f.x + 6, f.z - 4, w, left);
+          left = r.left;
+          if (!r.arrived) return;
+          t.phase = "filling";
+          continue;
+        }
+        case "filling": {
+          eq.state = "FUELING";
+          eq.activity = "fuel";
+          // Its own tank first, then the cargo tank.
+          const own = Math.min(def.fuelCapacityL - eq.fuelL, 400 * left);
+          eq.fuelL += own;
+          left -= own / 400;
+          const litres = Math.min(cargoCap - eq.cargoFuelL, 400 * left) + own;
+          eq.cargoFuelL += litres - own;
+          left -= (litres - own) / 400;
+          // Diesel is paid for when it is bought, at the station.
+          if (litres > 0) sim.spend(litres * sim.state.fuelPricePerL, "fuel", `Fill ${eq.name}'s tank`);
+          if (eq.cargoFuelL >= cargoCap - 0.5) t.phase = "to-target";
+          continue;
+        }
+        case "to-target": {
+          eq.activity = "drive";
+          eq.state = "TRAVELING";
+          t.status = "TRAVELING";
+          t.note = `Driving to ${target.name}`;
+          const p = besidePoint(target, clearance(sim, target, eq));
+          const r = goTo(sim, t, eq, p.x, p.z, w, left, 4);
+          left = r.left;
+          if (!r.arrived) return;
+          t.phase = "pumping";
+          continue;
+        }
+        case "pumping": {
+          t.status = "EXECUTING";
+          eq.state = "WORKING";
+          eq.activity = "fuel";
+          eq.heading = Math.atan2(target.x - eq.x, target.z - eq.z);
+          target.serviceHold = { by: t.id, reason: `Being refuelled and greased by ${eq.name}` };
+          const room = tdef.fuelCapacityL - target.fuelL;
+          const litres = Math.min(room, eq.cargoFuelL, pump * left);
+          target.fuelL += litres;
+          eq.cargoFuelL -= litres;
+          left -= litres / pump;
+          runEngine(sim, eq, litres / pump, 0.2, w?.skills.equipmentOperation);
+          t.note = `Pumping diesel into ${target.name} (${Math.round(target.fuelL)}/${tdef.fuelCapacityL} L)`;
+          t.progress = target.fuelL / tdef.fuelCapacityL;
+          if (target.fuelL >= tdef.fuelCapacityL - 0.5 || eq.cargoFuelL <= 0.5) {
+            t.phase = "greasing";
+            t.phaseTimer = 0;
+          }
+          continue;
+        }
+        case "greasing": {
+          t.note = `Greasing ${target.name}`;
+          const use = Math.min(left, 8 - t.phaseTimer);
+          t.phaseTimer += use;
+          left -= use;
+          if (t.phaseTimer < 8 - EPS) return;
+          target.hoursSinceGrease = 0;
+          sim.spend(45, "maintenance", `Grease ${target.name}`);
+          return completeTask(sim, t);
+        }
+        default:
+          t.phase = "plan";
+      }
+    }
+  },
+};
+
+// ---------------------------------------------------------------- SERVICE_CALL (mechanic truck)
+
+const SERVICE_CALL: TaskExecutor = {
+  validate(sim, t) {
+    const kind = t.params.service ?? "REPAIR";
+    if (t.destination?.kind === "conveyor") {
+      const c = conveyorById(sim, t.destination.id);
+      if (!c) return ["Unknown conveyor"];
+      return c.state === "DAMAGED" || c.condition < 60 ? [] : [`${c.name} does not need a mechanic`];
+    }
+    const target = targetEquipment(sim, t);
+    if (!target) return ["Choose the machine to service"];
+    if (sim.def(target).category === "SERVICE_TRUCK" && target.id === t.assignedEquipmentId) return ["A service truck cannot service itself"];
+    if (kind === "REPAIR" && target.state !== "BROKEN" && target.condition > 0) return [`${target.name} is not broken down`];
+    if (kind === "PM" && target.state === "BROKEN") return [`${target.name} is broken down: it needs a repair, not a service`];
+    return [];
+  },
+  start(_sim, t) {
+    t.phase = "to-target";
+    t.phaseTimer = 0;
+  },
+  run(sim, t, eq, w, budget) {
+    if (!eq) return;
+    const kind = t.params.service ?? "REPAIR";
+    const conveyor = t.destination?.kind === "conveyor" ? conveyorById(sim, t.destination.id) : null;
+    const target = conveyor ? null : targetEquipment(sim, t);
+    if (!conveyor && !target) return failTask(sim, t, "The machine no longer exists");
+    const def = sim.def(eq);
+    const skill = perf(w, "maintenance");
+    let left = budget;
+    if (t.phase === "to-target") {
+      const h = conveyor ? hopperById(sim, conveyor.hopperId) : null;
+      const p = target ? besidePoint(target, clearance(sim, target, eq)) : { x: (h?.x ?? eq.x) + 6, z: h?.z ?? eq.z };
+      eq.activity = "drive";
+      eq.state = "TRAVELING";
+      t.status = "TRAVELING";
+      t.note = `Driving out to ${target?.name ?? conveyor!.name}`;
+      const r = goTo(sim, t, eq, p.x, p.z, w, left, 4);
+      left = r.left;
+      if (!r.arrived) return;
+      t.phase = "work";
+      t.phaseTimer = 0;
+    }
+    t.status = "EXECUTING";
+    eq.state = "WORKING";
+    eq.activity = "service";
+    const factor = (def.fieldRepairFactor ?? 1) * (1.3 - 0.5 * skill);
+    let total: number;
+    if (conveyor) {
+      conveyor.state = "MAINTENANCE";
+      total = repairConveyorHours(conveyor) * 60 * factor;
+      t.note = `Repairing ${conveyor.name}: ${conveyor.breakdown?.cause ?? "overhaul"}`;
+    } else {
+      const m = target!;
+      total = kind === "REPAIR" ? repairHours(sim, m) * 60 * factor : sim.def(m).maintenanceHours * 60 * 0.8 * factor;
+      if (m.state !== "BROKEN") m.serviceHold = { by: t.id, reason: `${kind === "REPAIR" ? "Under repair" : "Being serviced"} by ${w?.name ?? "the mechanic"} (${eq.name})` };
+      t.note = kind === "REPAIR" ? `Repairing ${m.name}: ${m.breakdown?.cause ?? "fault"}` : `Servicing ${m.name}`;
+      if (m.state === "BROKEN") {
+        m.stats.downMin += left;
+      }
+    }
+    t.phaseTimer += left;
+    runEngine(sim, eq, left, 0.1, w?.skills.equipmentOperation);
+    t.progress = Math.min(1, t.phaseTimer / total);
+    t.estimatedDuration = Math.max(0, total - t.phaseTimer);
+    if (t.phaseTimer < total) return;
+    if (conveyor) {
+      finishConveyorRepair(sim, conveyor, skill);
+    } else if (kind === "REPAIR") {
+      const m = target!;
+      m.state = m.currentTaskId ? "ASSIGNED" : "AVAILABLE";
+      m.activity = "idle";
+      m.condition = Math.max(m.condition, 45 + 20 * skill);
+      m.breakdown = null;
+      m.hoursSinceGrease = 0;
+      const cost = repairCost(sim, m);
+      sim.spend(cost, "repairs", `Field repair ${m.name}`);
+      sim.bus.emit({ type: "EquipmentRepaired", equipmentId: m.id });
+      sim.notify("good", `${m.name} repaired in the field`, `${w?.name ?? "The mechanic"} brought ${eq.name} out. Back in service at ${m.condition.toFixed(0)}% condition, cost $${cost.toLocaleString()}.`, { kind: "equipment", id: m.id });
+    } else {
+      const m = target!;
+      const mdef = sim.def(m);
+      m.condition = Math.min(100, m.condition + 12);
+      m.hoursSinceService = 0;
+      m.hoursSinceGrease = 0;
+      sim.spend(Math.round(mdef.maintenanceCost * 0.9), "maintenance", `Field service ${m.name}`);
+      sim.notify("good", `${m.name} serviced in the field`, `Condition ${m.condition.toFixed(0)}%; next service due in ${mdef.maintenanceIntervalH} h.`, { kind: "equipment", id: m.id });
+    }
+    completeTask(sim, t);
+  },
+};
+
 export const EXECUTORS: Record<TaskType, TaskExecutor> = {
   MOVE,
   PARK,
@@ -1150,6 +1569,10 @@ export const EXECUTORS: Record<TaskType, TaskExecutor> = {
   STRIP_TOPSOIL,
   EXCAVATE,
   HAUL,
+  CONSTRUCT,
+  GRADE_ROAD,
+  FIELD_FUEL,
+  SERVICE_CALL,
 };
 
 /** Dev/debug hook: force a breakdown (spec §56 "damage equipment"). */
