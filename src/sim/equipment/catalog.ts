@@ -10,6 +10,8 @@ import hx350 from "../../data/equipment/hartmann_hx350.json" with { type: "json"
 import pd45 from "../../data/equipment/penrose_pd45.json" with { type: "json" };
 import dz9 from "../../data/equipment/ironback_dz9.json" with { type: "json" };
 import gr14 from "../../data/equipment/ironback_gr14.json" with { type: "json" };
+import lt9 from "../../data/equipment/ridgeline_lt9.json" with { type: "json" };
+import st5 from "../../data/equipment/ridgeline_st5.json" with { type: "json" };
 import upgradesJson from "../../data/equipment/upgrades.json" with { type: "json" };
 
 export interface EquipmentDefinition {
@@ -47,6 +49,11 @@ export interface EquipmentDefinition {
   /** Grader: working speed along a road, and condition points restored per pass. */
   gradeSpeedKmh?: number;
   gradeRestore?: number;
+  /** Lube truck: diesel carried for other machines (L) and pump rate (L/min). */
+  cargoFuelL?: number;
+  pumpLpm?: number;
+  /** Service truck: field work takes this fraction of the nominal repair time (tools and parts on board). */
+  fieldRepairFactor?: number;
   availableUpgrades: string[];
   size: { length: number; width: number; height: number };
   color: string;
@@ -111,7 +118,7 @@ export class Catalog {
 
 export function defaultCatalog(): Catalog {
   return new Catalog(
-    [rh60, rh90, hx350, pd45, dz9, gr14] as EquipmentDefinition[],
+    [rh60, rh90, hx350, pd45, dz9, gr14, lt9, st5] as EquipmentDefinition[],
     upgradesJson as UpgradeDefinition[],
   );
 }

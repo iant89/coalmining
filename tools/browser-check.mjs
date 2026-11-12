@@ -100,6 +100,31 @@ check(stats.gpuErrors === 0, `no GPU errors at start (${stats.gpuErrors}${stats.
 check(stats.drawCalls > 20, `scene draws (${stats.drawCalls} draw calls, ${stats.triangles} triangles)`);
 check((await page.locator("#hud .mine").textContent())?.includes("BLACK CREEK"), "HUD shows the mine name");
 
+// Day 1 opens with the morning meeting: the clock is paused and the foreman reports.
+{
+  const meeting = page.locator("#modal .dialog.meeting");
+  await meeting.waitFor({ timeout: 60000 });
+  check((await meeting.textContent())?.includes("Loretta Caudill"), "the morning meeting opens with the pit foreman's report");
+  check((await g(() => window.blackCreek.game.speed())) === 0, "the clock is paused for the meeting");
+  const card = meeting.locator(".crew", { hasText: "Pit crew" });
+  await card.locator("select[data-order-type]").selectOption("REMOVE_OVERBURDEN");
+  await card.locator("select[data-order-block]").selectOption("B3");
+  await card.locator("button[data-act=crew-add-order]").click();
+  await frames(1);
+  const orders = await g(() => window.blackCreek.game.ms.state.crews[0].orders.map((o) => `${o.type}:${o.blockId}`));
+  check(orders.includes("REMOVE_OVERBURDEN:B3"), `an order is given to the crew from the meeting (${orders.join(", ")})`);
+  await frames(2);
+  check((await card.textContent())?.includes("Block B3"), "the order appears on the crew's card");
+  await shot("0-meeting");
+  // Withdraw it again (this gate drives A2 by hand) and turn the daily meeting off for the run.
+  await card.locator("button[data-act=crew-order-remove]").first().click();
+  await meeting.locator("input[data-set=morningMeeting]").uncheck();
+  await meeting.locator("button[data-act=meeting-start]").click();
+  await frames(1);
+  const after = await g(() => ({ pending: window.blackCreek.game.ms.state.meeting?.pending, orders: window.blackCreek.game.ms.state.crews[0].orders.length, speed: window.blackCreek.game.speed(), on: window.blackCreek.game.ms.state.settings.morningMeeting }));
+  check(after.pending === false && after.speed > 0 && after.orders === 0 && after.on === false, `START THE DAY closes the meeting and restarts the clock (${JSON.stringify(after)})`);
+}
+
 // Click Block A2 on the map, through the real picking path.
 const a2 = await g(() => {
   const { game } = window.blackCreek;
@@ -224,6 +249,28 @@ await page.keyboard.press("Escape");
   await shot("6-logistics");
 }
 
+// Support trucks: the lube truck refuels the excavator where it stands.
+{
+  const lube = await g(() => {
+    const { game } = window.blackCreek;
+    const s = game.ms.state;
+    const ex = s.equipment.find((e) => e.defId === "hartmann_hx350");
+    ex.fuelL = game.ms.sim.def(ex).fuelCapacityL * 0.15;
+    const lt = s.equipment.find((e) => e.defId === "ridgeline_lt9");
+    for (let n = 0; n < 12 * 30 && !(lt.activity === "fuel" && lt.state === "WORKING"); n++) game.ms.tick();
+    game.select({ kind: "equipment", id: lt.id }, true);
+    game.rig.centerOn(lt.x, lt.z, 45);
+    return { activity: lt.activity, state: lt.state, hold: ex.serviceHold?.reason ?? null };
+  });
+  await frames(6);
+  check(lube.activity === "fuel" && !!lube.hold, `the lube truck is pumping diesel into the excavator (${JSON.stringify(lube)})`);
+  await shot("7-lube-truck");
+  await page.locator("#tabs button", { hasText: "CREWS" }).click();
+  await frames(2);
+  check((await page.locator("#drawer").textContent())?.includes("Pit crew"), "the CREWS tab lists the pit crew");
+  await page.locator("#tabs button", { hasText: "CREWS" }).click();
+}
+
 // Geology overlay and a wide view.
 await g(() => {
   const { game } = window.blackCreek;
@@ -254,6 +301,7 @@ await shot("5-end");
   phone.setDefaultTimeout(120000);
   await phone.goto(URL);
   await phone.waitForFunction(() => window.blackCreek, null, { timeout: 60000 });
+  await phone.locator("#modal button[data-act=meeting-start]").click();
   const pf = async (n) => {
     const t0 = await phone.evaluate(() => window.blackCreek.engine.stats().frame);
     await phone.waitForFunction((t) => window.blackCreek.engine.stats().frame >= t, t0 + n, { timeout: 180000, polling: 250 });

@@ -29,9 +29,11 @@ import { SLICE_OBJECTIVES } from "../../sim/objectives.js";
 import { CONSTRUCTION, estimateConveyor, estimateRoad, estimateStockpile, snapRoad, type ProjectEstimate } from "../../sim/logistics/construction.js";
 import { hopperOf, transitMinutes } from "../../sim/logistics/conveyors.js";
 import { ROAD_MAINTENANCE_THRESHOLD } from "../../sim/automation.js";
+import { BLOCK_ORDERS, checkInterval, crewOfEquipment, crewOfWorker, crewTonnes, ORDER_LABEL, orderLabel } from "../../sim/management/crews.js";
+import type { Crew, CrewOrderType } from "../../sim/state.js";
 
-type Tab = "MINE" | "EQUIPMENT" | "WORKERS" | "TASKS" | "LAND" | "PERMITS" | "FINANCE" | "PLANT" | "SAFETY" | "REPORTS" | "SETTINGS";
-const TABS: Tab[] = ["MINE", "EQUIPMENT", "WORKERS", "TASKS", "LAND", "PERMITS", "FINANCE", "PLANT", "SAFETY", "REPORTS", "SETTINGS"];
+type Tab = "MINE" | "CREWS" | "EQUIPMENT" | "WORKERS" | "TASKS" | "LAND" | "PERMITS" | "FINANCE" | "PLANT" | "SAFETY" | "REPORTS" | "SETTINGS";
+const TABS: Tab[] = ["MINE", "CREWS", "EQUIPMENT", "WORKERS", "TASKS", "LAND", "PERMITS", "FINANCE", "PLANT", "SAFETY", "REPORTS", "SETTINGS"];
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string, root: ParentNode = document): T => root.querySelector(sel) as T;
 
@@ -39,6 +41,9 @@ export class GameUI {
   private tab: Tab | null = null;
   private dialogOpen = false;
   private lastFeed = "";
+  /** The morning meeting dialog is open (it is re-rendered in place as orders change). */
+  private meetingOpen = false;
+  private speedBeforeMeeting = 1;
   private feedOpen = true;
 
   constructor(private api: GameApi) {
@@ -65,6 +70,84 @@ export class GameUI {
       this.renderDrawer();
     }
     if (this.api.debug) this.renderDev();
+    this.renderMeeting();
+  }
+
+  // ---------------------------------------------------------------- morning meeting
+
+  private renderMeeting(): void {
+    const m = this.sim.state.meeting;
+    if (this.meetingOpen) {
+      const root = document.querySelector<HTMLElement>("#modal .dialog.meeting");
+      const editing = document.activeElement?.closest("#modal") && /INPUT|SELECT/.test(document.activeElement.tagName);
+      if (root && !editing) morph(root, this.meetingHtml());
+      return;
+    }
+    if (!m?.pending || this.dialogOpen) return;
+    // Everything stops for the meeting; START THE DAY restores the speed.
+    const sp = this.api.speed();
+    this.speedBeforeMeeting = sp > 0 ? sp : this.lastSpeed || 1;
+    this.api.setSpeed(0);
+    this.openDialog(this.meetingHtml());
+    $("#modal .dialog").classList.add("meeting");
+    this.meetingOpen = true;
+  }
+
+  private meetingHtml(): string {
+    const sim = this.sim;
+    const m = sim.state.meeting;
+    if (!m) return "";
+    const reports = m.reports
+      .map((r) => `<div class="report"><b>${esc(r.crewName)}</b>${r.foremanName ? ` <span class="muted">— ${esc(r.foremanName)} reports</span>` : ""}${r.lines.map((l) => `<div class="line ${l.severity}">${esc(l.text)}</div>`).join("") || `<div class="line muted">Nothing to report.</div>`}</div>`)
+      .join("");
+    return `<h2>Morning meeting <span class="muted">day ${m.day}, ${esc(clockOf(m.minute).replace(/^D\d+ /, ""))}</span></h2>
+      <p class="muted">The foremen report on the last shift. Give each crew its orders in priority order; the foreman assigns the machines and people and follows the work up through the day.</p>
+      <div class="reports">${reports}</div>
+      ${this.crewsHtml(true)}
+      <div class="buttons right"><label class="toggle inline"><input type="checkbox" data-set="morningMeeting" ${sim.state.settings.morningMeeting ? "checked" : ""}> Meet every morning</label><button class="primary" data-act="meeting-start">START THE DAY</button></div>`;
+  }
+
+  private endMeetingDialog(): void {
+    this.closeDialog();
+  }
+
+  /** Crew cards: foreman, members, orders and the controls to change them (CREWS tab and meeting). */
+  private crewsHtml(inMeeting: boolean): string {
+    const sim = this.sim;
+    const s = sim.state;
+    const blocks = s.blocks.filter((b) => b.state !== "COMPLETE" && b.state !== "RECLAIMED");
+    const orderTypes = Object.keys(ORDER_LABEL) as CrewOrderType[];
+    const statusClass = { PENDING: "muted", ACTIVE: "good", DONE: "muted", STUCK: "bad" } as const;
+    const card = (c: Crew): string => {
+      const f = sim.worker(c.foremanId);
+      const eqs = c.equipmentIds.map((id) => sim.equipment(id)).filter((e): e is EquipmentInstance => !!e);
+      const people = c.workerIds.map((id) => sim.worker(id)).filter((w) => !!w);
+      const otherEq = s.equipment.filter((e) => !c.equipmentIds.includes(e.id));
+      const otherPeople = s.workers.filter((w) => w.employmentStatus !== "TERMINATED" && w.role !== "FOREMAN" && !c.workerIds.includes(w.id));
+      const orders = c.orders
+        .map((o, i) => `<tr><td>${i + 1}</td><td>${esc(orderLabel(sim, o))}</td><td class="${statusClass[o.status]}">${esc(label(o.status))}</td><td class="muted">${esc(o.note ?? "")}</td><td class="nowrap">${o.status !== "DONE" ? `<button data-act="crew-order-up" data-crew="${c.id}" data-id="${o.id}" ${i === 0 ? "disabled" : ""} title="Higher priority">▲</button><button data-act="crew-order-down" data-crew="${c.id}" data-id="${o.id}" ${i === c.orders.length - 1 ? "disabled" : ""} title="Lower priority">▼</button>` : ""}<button data-act="crew-order-remove" data-crew="${c.id}" data-id="${o.id}" title="Withdraw the order">✕</button></td></tr>`)
+        .join("");
+      return `<div class="crew" data-crew-card="${c.id}">
+        <h3>${esc(c.name)} <span class="muted">${f ? `foreman <a data-act="select-worker" data-id="${f.id}">${esc(f.name)}</a> · rounds every ${Math.round(checkInterval(f.skills.leadership))} min` : "<span class='bad'>no foreman</span>"} · ${tonnes(crewTonnes(sim, c) - c.tonnesAtMeeting)} hauled since the meeting</span></h3>
+        <table class="grid small"><tr><th>#</th><th>Order</th><th>Status</th><th>Foreman's note</th><th></th></tr>${orders || `<tr><td colspan="5" class="muted">No orders: the crew stands idle.</td></tr>`}</table>
+        <div class="buttons add-order">
+          <select data-order-type="${c.id}">${orderTypes.map((t) => `<option value="${t}">${esc(ORDER_LABEL[t])}</option>`).join("")}</select>
+          <select data-order-block="${c.id}">${blocks.map((b) => `<option value="${b.id}">${esc(b.name)} · ${esc(label(b.state))}</option>`).join("")}</select>
+          <button class="primary" data-act="crew-add-order" data-crew="${c.id}">ADD ORDER</button>
+          ${c.orders.some((o) => o.status === "DONE") ? `<button data-act="crew-clear-done" data-crew="${c.id}">CLEAR FINISHED</button>` : ""}
+        </div>
+        <div class="members"><b>Machines</b> ${eqs.map((e) => `<span class="chip ${e.state === "BROKEN" ? "bad" : ""}">${esc(e.name)}<button data-act="crew-remove-eq" data-crew="${c.id}" data-id="${e.id}" title="Take out of the crew">✕</button></span>`).join(" ") || `<span class="muted">none</span>`}
+          <select data-crew-add-eq="${c.id}"><option value="">add machine…</option>${otherEq.map((e) => `<option value="${e.id}">${esc(e.name)}${crewOfEquipment(sim, e.id) ? ` (${esc(crewOfEquipment(sim, e.id)!.name)})` : ""}</option>`).join("")}</select></div>
+        <div class="members"><b>People</b> ${people.map((w) => `<span class="chip">${esc(w!.name)}<button data-act="crew-remove-worker" data-crew="${c.id}" data-id="${w!.id}" title="Take out of the crew">✕</button></span>`).join(" ") || `<span class="muted">none</span>`}
+          <select data-crew-add-worker="${c.id}"><option value="">add person…</option>${otherPeople.map((w) => `<option value="${w.id}">${esc(w.name)} · ${esc(roleLabel(w.role))}${crewOfWorker(sim, w.id) ? ` (${esc(crewOfWorker(sim, w.id)!.name)})` : ""}</option>`).join("")}</select></div>
+      </div>`;
+    };
+    const freeForemen = s.workers.filter((w) => w.role === "FOREMAN" && w.employmentStatus === "ACTIVE" && !s.crews.some((c) => c.foremanId === w.id));
+    return `${inMeeting ? "" : `<h2>Crews <span class="muted">${s.settings.morningMeeting ? `morning meeting at ${String(s.shift.startHour).padStart(2, "0")}:00` : "morning meetings off"}</span></h2>
+      <p class="muted">Each crew's foreman turns its orders into tasks, staffs them from the crew only and chases what stalls. Your own orders (from blocks and machines) can still use anything.</p>`}
+      ${s.crews.map(card).join("") || `<p class="muted">No crews. Hire a foreman from the applicant pool (WORKERS) and form one.</p>`}
+      ${freeForemen.length ? `<div class="buttons">${freeForemen.map((w) => `<button data-act="crew-form" data-id="${w.id}">FORM A CREW UNDER ${esc(w.name.toUpperCase())}</button>`).join("")}</div>` : ""}
+      ${inMeeting ? "" : `<div class="buttons"><button data-act="meeting-call">CALL A MEETING NOW</button></div>`}`;
   }
 
   private renderHud(): void {
@@ -162,6 +245,9 @@ export class GameUI {
         <tr><td>Task</td><td>${task ? `<a data-act="select-task" data-id="${task.id}">${esc(task.label)}</a><div class="muted">${esc(label(task.status))}${task.blockedReason ? ` — <span class="bad">${esc(task.blockedReason)}</span>` : task.note ? ` — ${esc(task.note)}` : ""}</div>` : "<span class='muted'>idle</span>"}</td></tr>
         ${def.category === "HAUL_TRUCK" ? `<tr><td>Payload</td><td>${eq.payload ? `${tonnes(eq.payload.tonnes)} ${esc(MATERIAL_LABEL[eq.payload.type].toLowerCase())}` : "empty"} <span class="muted">/ ${Math.round(cap)} t</span></td></tr>` : ""}
         ${eq.breakdown ? `<tr><td>Fault</td><td class="bad">${esc(eq.breakdown.cause)}</td></tr>` : ""}
+        ${eq.serviceHold ? `<tr><td>Service</td><td class="good">${esc(eq.serviceHold.reason)}</td></tr>` : ""}
+        ${def.category === "LUBE_TRUCK" ? `<tr><td>Diesel tank</td><td>${bar(eq.cargoFuelL / (def.cargoFuelL ?? 1))} ${Math.round(eq.cargoFuelL).toLocaleString()} / ${(def.cargoFuelL ?? 0).toLocaleString()} L</td></tr>` : `<tr><td>Grease</td><td class="${eq.hoursSinceGrease > 60 ? "warn" : "muted"}">${Math.round(eq.hoursSinceGrease)} h since greased${eq.hoursSinceGrease > 60 ? " — dry pins wear faster" : ""}</td></tr>`}
+        <tr><td>Crew</td><td>${esc(crewOfEquipment(sim, eq.id)?.name ?? (def.category === "LUBE_TRUCK" || def.category === "SERVICE_TRUCK" ? "mine support" : "none — only your orders use it"))}</td></tr>
         <tr><td>Risk</td><td><span class="risk ${risk.category}">${risk.category}</span> ${risk.score.toFixed(0)} <div class="muted">${risk.factors.slice(0, 3).map((f) => `${esc(f.label)} +${f.points}`).join(" · ") || "no significant factors"}</div></td></tr>
         <tr><td>Upgrades</td><td>${up.length ? up.map(esc).join(", ") : "<span class='muted'>standard</span>"}</td></tr>
         <tr><td>Totals</td><td class="muted">${tonnes(eq.stats.tonnesMoved)} moved · ${eq.stats.loads} loads · ${formatDuration(eq.stats.workingMin)} working · ${formatDuration(eq.stats.downMin)} down</td></tr>
@@ -316,6 +402,9 @@ export class GameUI {
           ${this.logisticsHtml()}`;
         break;
       }
+      case "CREWS":
+        html = this.crewsHtml(false);
+        break;
       case "EQUIPMENT": {
         html = `<h2>Fleet</h2><table class="grid"><tr><th>Unit</th><th>Model</th><th>State</th><th>Condition</th><th>Fuel</th><th>Operator</th><th>Task</th></tr>${s.equipment
           .map((e) => {
@@ -407,8 +496,9 @@ export class GameUI {
       }
       case "SETTINGS": {
         html = `<h2>Settings</h2>
-          <label class="toggle"><input type="checkbox" data-set="autoFuel" ${s.settings.autoFuel ? "checked" : ""}> Auto-refuel (trucks drive to the fuel station; a fuel truck serves excavators, drills and dozers)</label>
-          <label class="toggle"><input type="checkbox" data-set="autoMaintenance" ${s.settings.autoMaintenance ? "checked" : ""}> Auto-file repairs when a machine breaks down</label>
+          <label class="toggle"><input type="checkbox" data-set="autoFuel" ${s.settings.autoFuel ? "checked" : ""}> Auto-refuel (trucks drive to the fuel station; lube trucks refuel and grease machines in the field)</label>
+          <label class="toggle"><input type="checkbox" data-set="autoMaintenance" ${s.settings.autoMaintenance ? "checked" : ""}> Auto-maintenance: file repairs on breakdown (service trucks drive the mechanic out) and field-service overdue machines</label>
+          <label class="toggle"><input type="checkbox" data-set="morningMeeting" ${s.settings.morningMeeting ? "checked" : ""}> Morning meeting with the foremen at every shift start (the game pauses for it)</label>
           <label class="toggle"><input type="checkbox" data-set="autoGrade" ${s.settings.autoGrade ? "checked" : ""}> Auto-grade haul roads: idle graders take the worst road below ${ROAD_MAINTENANCE_THRESHOLD}%</label>
           <h3>Save &amp; load</h3><div class="buttons">${[1, 2, 3].map((n) => `<button data-act="save" data-id="slot${n}">SAVE ${n}</button><button data-act="load" data-id="slot${n}">LOAD ${n}</button>`).join("")}</div>
           <div class="buttons"><button data-act="export">EXPORT SAVE FILE</button><button data-act="import">IMPORT SAVE FILE</button><button data-act="new" class="warn">NEW GAME</button></div>
@@ -594,6 +684,12 @@ export class GameUI {
   }
 
   closeDialog(): void {
+    // Closing the meeting any way (Esc, ✕) starts the day.
+    if (this.meetingOpen) {
+      this.meetingOpen = false;
+      cmd.closeMeeting(this.sim);
+      this.api.setSpeed(this.speedBeforeMeeting || 1);
+    }
     const m = $("#modal");
     m.classList.remove("open");
     m.innerHTML = "";
@@ -902,6 +998,39 @@ export class GameUI {
       case "tab":
         this.tab = this.tab === id ? null : (id as Tab);
         break;
+      case "meeting-start":
+        this.endMeetingDialog();
+        break;
+      case "meeting-call":
+        fail(cmd.callMeeting(sim));
+        break;
+      case "crew-form":
+        fail(cmd.createCrew(sim, id));
+        break;
+      case "crew-add-order": {
+        const crew = target.dataset.crew!;
+        const scope = target.closest(".crew") ?? document;
+        const type = (scope.querySelector(`[data-order-type="${crew}"]`) as HTMLSelectElement).value as CrewOrderType;
+        const block = (scope.querySelector(`[data-order-block="${crew}"]`) as HTMLSelectElement | null)?.value ?? null;
+        fail(cmd.addCrewOrder(sim, crew, type, BLOCK_ORDERS.has(type) ? block : null));
+        break;
+      }
+      case "crew-order-up":
+      case "crew-order-down":
+        fail(cmd.moveCrewOrder(sim, target.dataset.crew!, id, act === "crew-order-up" ? -1 : 1));
+        break;
+      case "crew-order-remove":
+        fail(cmd.removeCrewOrder(sim, target.dataset.crew!, id));
+        break;
+      case "crew-clear-done":
+        fail(cmd.clearDoneOrders(sim, target.dataset.crew!));
+        break;
+      case "crew-remove-eq":
+        fail(cmd.assignToCrew(sim, null, { equipmentId: id }));
+        break;
+      case "crew-remove-worker":
+        fail(cmd.assignToCrew(sim, null, { workerId: id }));
+        break;
       case "feed-toggle":
         this.feedOpen = !this.feedOpen;
         this.lastFeed = "";
@@ -1101,6 +1230,14 @@ export class GameUI {
   bindSettings(): void {
     document.addEventListener("change", (e) => {
       const sel = e.target as HTMLSelectElement;
+      if (sel.dataset?.crewAddEq || sel.dataset?.crewAddWorker) {
+        if (!sel.value) return;
+        const crew = (sel.dataset.crewAddEq ?? sel.dataset.crewAddWorker)!;
+        const r = cmd.assignToCrew(this.sim, crew, sel.dataset.crewAddEq ? { equipmentId: sel.value } : { workerId: sel.value });
+        if (!r.ok) this.sim.notify("warn", "Can't do that", r.error);
+        sel.blur();
+        return;
+      }
       if (sel.dataset?.coalDest) {
         const r = cmd.setCoalDestination(this.sim, sel.value || null);
         if (!r.ok) this.sim.notify("warn", "Can't do that", r.error);
@@ -1110,7 +1247,7 @@ export class GameUI {
       const key = t.dataset?.set;
       const settings = this.sim.state.settings;
       // Only the boolean switches are checkboxes.
-      if (key === "autoFuel" || key === "autoMaintenance" || key === "autoGrade") settings[key] = t.checked;
+      if (key === "autoFuel" || key === "autoMaintenance" || key === "autoGrade" || key === "morningMeeting") settings[key] = t.checked;
     });
   }
 

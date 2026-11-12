@@ -12,6 +12,7 @@ import { estimateRoad } from "../src/sim/logistics/construction.js";
 import { addToHopper, transitMinutes } from "../src/sim/logistics/conveyors.js";
 import { deserialize, serialize } from "../src/sim/save/save.js";
 import { MineSimulation } from "../src/sim/simulation.js";
+import { SAVE_VERSION } from "../src/sim/scenario.js";
 import type { MineSimulation as MS } from "../src/sim/simulation.js";
 
 const FROM = { x: 112, z: 108 };
@@ -192,7 +193,7 @@ test("a version-1 save migrates to the current format and keeps playing", () => 
   delete json.state.settings.autoGrade;
   delete json.state.settings.coalDestination;
   const { state } = deserialize(JSON.stringify(json));
-  assert.equal(state.saveVersion, 2);
+  assert.equal(state.saveVersion, SAVE_VERSION);
   assert.deepEqual(state.projects, []);
   assert.deepEqual(state.conveyors, []);
   assert.equal(state.settings.coalDestination, null);

@@ -16,7 +16,9 @@ import { dailyMarket } from "./economy/market.js";
 import { processLab } from "./mining/exploration.js";
 import { newDayWorkforce } from "./workforce/workforce.js";
 import { updateObjectives } from "./objectives.js";
-import { autoDispatch, wireAutomation } from "./automation.js";
+import { autoDispatch, supportDispatch, wireAutomation } from "./automation.js";
+import { tickForemen } from "./management/crews.js";
+import { holdMeeting, isShiftStart } from "./management/meeting.js";
 import { tickConveyors } from "./logistics/conveyors.js";
 
 export function emptyDay(day: number): DayStats {
@@ -64,6 +66,10 @@ export class MineSimulation {
     const minute = sim.clock.isMinuteBoundary;
     // 02–03. Weather, roads, environment.
     if (hour) hourlyEnvironment(sim);
+    // Shift start: the foremen meet (the UI pauses for it); then they make their rounds.
+    if (isShiftStart(sim) && sim.state.settings.morningMeeting) holdMeeting(sim);
+    if (minute) tickForemen(sim);
+    if (minute && Math.round(sim.clock.minute) % 10 === 0) supportDispatch(sim);
     // Blast exclusion zone clearance runs ahead of task work.
     blastClearance(sim);
     // 04–11. Workers, equipment, tasks, mining, logistics (executors drive all of these).

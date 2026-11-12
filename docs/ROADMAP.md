@@ -10,8 +10,8 @@ system exists at the depth the first vertical slice needs; the spec's later dept
 | 01 | Engine integration, bootstrap, clock, scene, selection, camera, UI, save/load | **Done** — 5 s tick clock with speeds, Forge scene + day/night from the sim clock, picking, 4 camera modes, HUD/panels/dialogs, versioned saves (localStorage + file export/import, autosave) |
 | 02 | Mine world, terrain chunks, roads, environment, map bounds | **Done (slice)** — 96×96 heightfield in 16-cell chunks with dirty rebuilds, road graph rasterised into the terrain, bounded camera |
 | 03 | Geology, coal seam, overburden, materials, exploration, drilling | **Done (slice)** — layered geology with quality, true vs known geology, core holes with lab delay, blast-hole logging, legacy samples |
-| 04 | Equipment, movement, state, fuel, wear, maintenance | **Done (slice)** — data-driven catalog (5 models), upgrades, routing over roads/off-road with grade/load/weather/operator effects, fuel, wear, breakdown hazard, service and repair |
-| 05 | Workforce, skills, hiring, operators, fatigue | **Done (slice)** — 8 employees, skills, certifications with expiry, shifts, fatigue, payroll with burden, applicants, training |
+| 04 | Equipment, movement, state, fuel, wear, maintenance | **Done (slice)** — data-driven catalog (8 models), upgrades, lube trucks (field refuelling and greasing; grease interval affects wear) and service trucks (field repairs and preventive maintenance by the mechanic), routing over roads/off-road with grade/load/weather/operator effects, fuel, wear, breakdown hazard, service and repair |
+| 05 | Workforce, skills, hiring, operators, fatigue | **Done (slice)** — 9 employees, skills, certifications with expiry, shifts, fatigue, payroll with burden, applicants, training. **Management:** foremen lead crews (machines + people) from prioritised orders (remove overburden, mine coal, strip topsoil, core-drill a block, keep roads graded), staff tasks only from their crew, follow them up on rounds paced by leadership, re-drill unbroken rock; a morning meeting at each shift start reports per crew and is where the player re-plans |
 | 06 | Task architecture, queue, dependencies, assignment, dispatch, AI | **Done** — full lifecycle, validation with reasons, prerequisites, priorities, Role/Equipment/Movement AI layers, production-objective orders |
 | 07 | Benches, blasting, overburden, coal exposure, extraction | **Done (slice)** — mining blocks with states, pattern design, abstract blast design (fragmentation, vibration/airblast/flyrock, coal damage), exclusion-zone clearance, top-down excavation, coal recovery |
 | 08 | Haul roads, stockpiles, conveyors, routing | **Done (slice)** — data-driven construction projects (`src/data/construction.json`) built through tasks: haul roads built by a dozer that grades the alignment and joins the road graph; truck hoppers + overland conveyors (plug-flow belt, rated capacity, start-up, jams on a full stockpile, power cost, wear, breakdowns, mechanic repairs); player-built stockpiles; graders and an automatic road-maintenance objective; coal routing to a stockpile or hopper. Water trucks / dust not started (they belong with phase 14's dust) |
@@ -70,6 +70,8 @@ system exists at the depth the first vertical slice needs; the spec's later dept
 
 ## Known limitations
 
+- Foremen do not yet plan blocks themselves (which block next) or ask to hire; the player gives
+  every order. Crews share the support trucks, which are dispatched mine-wide.
 - Haul roads are straight segments between two points; curves are built from several roads.
 - Conveyors are single straight flights from one hopper to one stockpile (no transfer points yet).
 

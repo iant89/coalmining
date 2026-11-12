@@ -10,7 +10,9 @@
       "EXCAVATOR",
       "DRILL",
       "DOZER",
-      "GRADER"
+      "GRADER",
+      "LUBE_TRUCK",
+      "SERVICE_TRUCK"
     ],
     "modifiers": {
       "fuelBurn": 0.86,
@@ -88,7 +90,9 @@
       "EXCAVATOR",
       "DRILL",
       "DOZER",
-      "GRADER"
+      "GRADER",
+      "LUBE_TRUCK",
+      "SERVICE_TRUCK"
     ],
     "modifiers": {
       "breakdownHazard": 0.45

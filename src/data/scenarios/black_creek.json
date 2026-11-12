@@ -94,10 +94,16 @@
     { "defId": "ridgeline_rh60", "name": "RH60 #1", "x": -14, "z": 104, "heading": 3.14, "condition": 62, "hours": 31050, "hoursSinceService": 210, "fuelPct": 0.55, "operator": "emp-wanda" },
     { "defId": "ridgeline_rh60", "name": "RH60 #2", "x": -2, "z": 104, "heading": 3.14, "condition": 71, "hours": 26300, "hoursSinceService": 95, "fuelPct": 0.8, "operator": "emp-ray" },
     { "defId": "penrose_pd45", "name": "PD-45 Drill", "x": 10, "z": 104, "heading": 3.14, "condition": 64, "hours": 17800, "hoursSinceService": 60, "fuelPct": 0.66, "operator": "emp-clyde" },
-    { "defId": "ironback_dz9", "name": "DZ-9 Dozer", "x": 22, "z": 104, "heading": 3.14, "condition": 58, "hours": 28900, "hoursSinceService": 180, "fuelPct": 0.61, "operator": "emp-dale" }
+    { "defId": "ironback_dz9", "name": "DZ-9 Dozer", "x": 22, "z": 104, "heading": 3.14, "condition": 58, "hours": 28900, "hoursSinceService": 180, "fuelPct": 0.61, "operator": "emp-dale" },
+    { "defId": "ridgeline_lt9", "name": "LT-9 Lube #1", "x": 34, "z": 104, "heading": 3.14, "condition": 74, "hours": 14200, "hoursSinceService": 40, "fuelPct": 0.9, "operator": "emp-mae" },
+    { "defId": "ridgeline_st5", "name": "ST-5 Service #1", "x": 46, "z": 104, "heading": 3.14, "condition": 70, "hours": 16900, "hoursSinceService": 55, "fuelPct": 0.85, "operator": "emp-hank" }
+  ],
+  "crews": [
+    { "id": "crew-pit", "name": "Pit crew", "foreman": "emp-loretta", "equipment": ["HX350 #1", "RH60 #1", "RH60 #2", "PD-45 Drill", "DZ-9 Dozer"], "workers": ["emp-earl", "emp-wanda", "emp-ray", "emp-dale", "emp-clyde", "emp-tommy"] }
   ],
   "workers": [
-    { "id": "emp-earl", "name": "Earl Hatfield", "age": 61, "role": "OPERATOR", "experienceYears": 38, "wagePerHour": 41, "skill": 0.9, "safety": 0.85, "certifications": ["EXCAVATOR", "DOZER", "HAUL_TRUCK"], "note": "Foreman. Ran your grandfather's shovel for thirty years." },
+    { "id": "emp-loretta", "name": "Loretta Caudill", "age": 49, "role": "FOREMAN", "experienceYears": 26, "wagePerHour": 45, "skill": 0.7, "safety": 0.88, "certifications": [], "note": "Pit foreman. Runs the morning meeting and the crew; tell her what you want done." },
+    { "id": "emp-earl", "name": "Earl Hatfield", "age": 61, "role": "OPERATOR", "experienceYears": 38, "wagePerHour": 41, "skill": 0.9, "safety": 0.85, "certifications": ["EXCAVATOR", "DOZER", "HAUL_TRUCK"], "note": "Ran your grandfather's shovel for thirty years." },
     { "id": "emp-wanda", "name": "Wanda Slone", "age": 44, "role": "OPERATOR", "experienceYears": 17, "wagePerHour": 34, "skill": 0.75, "safety": 0.8, "certifications": ["HAUL_TRUCK", "EXCAVATOR"] },
     { "id": "emp-ray", "name": "Ray Combs", "age": 37, "role": "OPERATOR", "experienceYears": 9, "wagePerHour": 31, "skill": 0.62, "safety": 0.65, "certifications": ["HAUL_TRUCK"] },
     { "id": "emp-dale", "name": "Dale Napier", "age": 52, "role": "OPERATOR", "experienceYears": 24, "wagePerHour": 33, "skill": 0.7, "safety": 0.75, "certifications": ["DOZER", "HAUL_TRUCK", "GRADER"] },

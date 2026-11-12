@@ -113,7 +113,7 @@ export function generateCandidate(sim: Sim, role: WorkerRole = "OPERATOR"): Empl
     driving: Math.min(1, base + r.range(-0.1, 0.15)),
     drilling: r.range(0.1, 0.7),
     blasting: role === "BLASTER" ? Math.min(1, base + 0.15) : r.range(0, 0.4),
-    leadership: r.range(0.1, 0.7),
+    leadership: role === "FOREMAN" ? Math.min(1, 0.55 + experience * 0.015 + r.range(0, 0.2)) : r.range(0.1, 0.7),
   };
   const certPool = ["HAUL_TRUCK", "EXCAVATOR", "DOZER", "DRILL", "GRADER"];
   const certs = certPool.filter(() => r.chance(0.35 + experience * 0.02)).map((type) => ({ type, expiresDay: null as number | null }));
@@ -130,7 +130,7 @@ export function generateCandidate(sim: Sim, role: WorkerRole = "OPERATOR"): Empl
     reliability: r.range(0.6, 1),
     fatigue: 0,
     morale: r.range(60, 90),
-    wagePerHour: Math.round(24 + experience * 0.9 + base * 10 + certs.length * 1.5),
+    wagePerHour: Math.round(24 + experience * 0.9 + base * 10 + certs.length * 1.5 + (role === "FOREMAN" ? 10 : 0)),
     certifications: certs,
     assignedEquipmentId: null,
     employmentStatus: "ACTIVE",

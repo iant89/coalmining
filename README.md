@@ -58,6 +58,20 @@ URL options: `?new=1` ignores the autosave, `?seed=N` generates a different mine
 
 ![A conveyor from a pit-side hopper to the ROM stockpile, and a new haul road](docs/images/logistics.png)
 
+7. **Run the mine through your foreman.** Every shift starts with a **morning meeting** (the game
+   pauses): Loretta Caudill reports on the pit crew (tonnes hauled, orders, breakdowns, tired
+   people). Give the crew orders in priority order — *Remove overburden*, *Mine coal*, *Strip
+   topsoil*, *Core-drill block*, *Keep haul roads graded* — and press **START THE DAY**. She turns
+   them into tasks using only the crew's machines and people, re-drills rock that did not break,
+   and waits for the overburden before mining coal. Move machines and people between crews, hire
+   another foreman from the applicants and form a second crew (*CREWS* tab, any time).
+8. **Support trucks.** The **lube truck** drives to machines that are low on diesel or overdue for
+   grease and fills them where they work (it refills at the fuel station; dry pins wear faster).
+   The **service truck** takes the mechanic out to breakdowns and does preventive services in the
+   field, so machines no longer walk to the shop.
+
+![The morning meeting: the foreman's report and the crew's orders](docs/images/meeting.png)
+
 Everything can also be done by hand: select a machine and **ASSIGN TASK** (the dialog validates
 before assignment and explains every problem).
 
@@ -89,6 +103,7 @@ src/sim/        the simulation — authoritative, deterministic, no engine impor
   mining/       blocks, exploration, drilling, blasting, excavation
   equipment/    data-driven catalog, movement, fuel/wear/breakdowns
   workforce/    shifts, fatigue, qualifications, payroll
+  management/   crews, foremen and their orders, the morning meeting
   logistics/    road network routing, dumps, stockpiles
   economy/ regulatory/ environment/   market, permits, safety, weather
   commands.ts   every player/developer action

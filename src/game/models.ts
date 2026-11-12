@@ -244,6 +244,58 @@ export function buildGrader(scene: Scene, kit: ModelKit, name: string, color: st
   return { root, pivots: { blade }, parts: {}, radius: L * 0.55, height: size.height };
 }
 
+/** Two-axle road-truck chassis and cab shared by the lube and service trucks. */
+function utilityChassis(scene: Scene, kit: ModelKit, root: Entity, name: string, color: PartOptions["color"], L: number, W: number): number {
+  const r = 0.55;
+  const deck = r * 2 + 0.25;
+  part(scene, kit, root, `${name}.chassis`, { pos: [0, r + 0.35, 0], size: [W * 0.7, 0.4, L * 0.95], color: DARK });
+  part(scene, kit, root, `${name}.cab`, { pos: [0, deck + 0.85, L * 0.36], size: [W * 0.92, 1.7, L * 0.2], color });
+  part(scene, kit, root, `${name}.glass`, { pos: [0, deck + 1.15, L * 0.461], size: [W * 0.8, 0.7, 0.05], color: GLASS, roughness: 0.15, metallic: 0.3 });
+  part(scene, kit, root, `${name}.bumper`, { pos: [0, r + 0.3, L * 0.48], size: [W * 0.95, 0.35, 0.2], color: STEEL, metallic: 0.5 });
+  // Amber beacon on the cab roof.
+  part(scene, kit, root, `${name}.beacon`, { pos: [0, deck + 1.8, L * 0.36], size: [0.25, 0.2, 0.25], color: 0xf2a516, geometry: "cylinder", shadow: false });
+  for (const [z, tag] of [[L * 0.33, "F"], [-L * 0.22, "R1"], [-L * 0.36, "R2"]] as const) {
+    wheel(scene, kit, root, `${name}.w${tag}L`, -W * 0.42, z, r, 0.45);
+    wheel(scene, kit, root, `${name}.w${tag}R`, W * 0.42, z, r, 0.45);
+  }
+  return deck;
+}
+
+/** Lube truck: a diesel tank behind the cab and a hose-reel cabinet at the back. */
+export function buildLubeTruck(scene: Scene, kit: ModelKit, name: string, color: string, size: { length: number; width: number; height: number }): EquipmentModel {
+  const root = placed(scene, name, new Vec3(0, 0, 0));
+  const L = size.length;
+  const W = size.width;
+  const deck = utilityChassis(scene, kit, root, name, 0xe8e2d0, L, W);
+  const d = Math.min(W * 0.85, size.height - deck - 0.1);
+  part(scene, kit, root, `${name}.tank`, { pos: [0, deck + d / 2, -L * 0.04], size: [d, L * 0.5, d], color, geometry: "cylinder", rot: [Math.PI / 2, 0, 0], metallic: 0.4, roughness: 0.35 });
+  part(scene, kit, root, `${name}.band1`, { pos: [0, deck + d / 2, L * 0.12], size: [d * 1.04, 0.12, d * 1.04], color: 0x1f5f9f, geometry: "cylinder", rot: [Math.PI / 2, 0, 0] });
+  part(scene, kit, root, `${name}.band2`, { pos: [0, deck + d / 2, -L * 0.2], size: [d * 1.04, 0.12, d * 1.04], color: 0x1f5f9f, geometry: "cylinder", rot: [Math.PI / 2, 0, 0] });
+  part(scene, kit, root, `${name}.reels`, { pos: [0, deck + 0.7, -L * 0.42], size: [W * 0.95, 1.4, L * 0.14], color: STEEL, metallic: 0.4 });
+  const hose = pivot(scene, root, `${name}.hose`, [W * 0.48, deck + 0.6, -L * 0.42]);
+  const nozzle = part(scene, kit, hose, `${name}.hoseLine`, { pos: [0.9, 0, 0], size: [1.8, 0.1, 0.1], color: 0x161616, shadow: false });
+  return { root, pivots: { hose }, parts: { nozzle }, radius: L * 0.55, height: size.height };
+}
+
+/** Service (mechanic's) truck: tool boxes along both sides and a knuckle crane at the back. */
+export function buildServiceTruck(scene: Scene, kit: ModelKit, name: string, color: string, size: { length: number; width: number; height: number }): EquipmentModel {
+  const root = placed(scene, name, new Vec3(0, 0, 0));
+  const L = size.length;
+  const W = size.width;
+  const deck = utilityChassis(scene, kit, root, name, color, L, W);
+  part(scene, kit, root, `${name}.bed`, { pos: [0, deck + 0.05, -L * 0.1], size: [W * 0.6, 0.1, L * 0.62], color: DARK });
+  for (const side of [-1, 1]) {
+    part(scene, kit, root, `${name}.box${side}`, { pos: [side * W * 0.36, deck + 0.6, -L * 0.1], size: [W * 0.28, 1.2, L * 0.62], color });
+    for (let n = 0; n < 3; n++) part(scene, kit, root, `${name}.door${side}${n}`, { pos: [side * W * 0.501, deck + 0.6, -L * 0.1 + (n - 1) * L * 0.2], size: [0.04, 0.95, L * 0.17], color: 0xd8d8d8, metallic: 0.6, roughness: 0.3, shadow: false });
+  }
+  const crane = pivot(scene, root, `${name}.crane`, [W * 0.25, deck + 1.2, -L * 0.38]);
+  part(scene, kit, crane, `${name}.post`, { pos: [0, 0.35, 0], size: [0.45, 0.7, 0.45], color: 0xf2c014, geometry: "cylinder" });
+  const boom = pivot(scene, crane, `${name}.boom`, [0, 0.7, 0]);
+  part(scene, kit, boom, `${name}.boomArm`, { pos: [0, 0, 1.6], size: [0.3, 0.3, 3.2], color: 0xf2c014 });
+  part(scene, kit, boom, `${name}.hook`, { pos: [0, -0.5, 3.1], size: [0.05, 1.0, 0.05], color: DARK, shadow: false });
+  return { root, pivots: { crane, boom }, parts: {}, radius: L * 0.55, height: size.height };
+}
+
 /**
  * An overland conveyor between two ground points: a truck hopper, a run of trussed frame sections on
  * supports, the belt (with a load strip the view scales with the material on it) and a drive head
