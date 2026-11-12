@@ -14,6 +14,7 @@ import type { ConstructionProject, ConstructionType, Conveyor, Hopper, RoadEdge,
 import { rasterizeRoads } from "./navigation.js";
 import { rectContains } from "../world/terrain.js";
 import data from "../../data/construction.json" with { type: "json" };
+import { PLANT } from "../processing/plant.js";
 
 export const CONSTRUCTION = data;
 
@@ -300,6 +301,17 @@ function completeProject(sim: Sim, p: ConstructionProject): void {
     sim.state.roadEdges.push(edge);
     rasterizeRoads(sim);
     sim.notify("good", `${p.name} is open`, `${Math.round(pathLength(p.path))} m of haul road joined the network. Trucks will use it from their next trip.`);
+  } else if (p.type === "PLANT_REFURBISH") {
+    const plant = sim.state.plant;
+    if (plant) {
+      for (const u of plant.units) {
+        u.condition = Math.max(u.condition, PLANT.refurbish.condition);
+        u.breakdown = null;
+      }
+      plant.status = "OFF";
+      plant.stopReason = "Switched off";
+      sim.notify("good", `${plant.name} refurbished`, "Ready to run: assign a plant operator, choose the feed rate and cut density, and switch it on (PLANT tab).", { kind: "plant", id: plant.id });
+    }
   } else if (p.type === "STOCKPILE") {
     const at = p.path[0]!;
     const s: Stockpile = { id: sim.nextId("stockpile"), name: p.name, x: at.x, z: at.z, materialType: "COAL_RAW", capacityT: p.capacityT ?? 10000, tonnes: 0, quality: null, inT: 0, outT: 0 };
@@ -350,7 +362,28 @@ export function cancelProject(sim: Sim, id: string): string | null {
   if (!p) return "Unknown project";
   if (p.status === "COMPLETE") return "That project is already complete";
   p.status = "CANCELLED";
+  if (p.type === "PLANT_REFURBISH" && sim.state.plant?.status === "REFURBISHING") sim.state.plant.status = "MOTHBALLED";
   return null;
+}
+
+/** Refurbishing the mothballed preparation plant: a contractor crew, paid as the work is done. */
+export function estimatePlantRefurbish(sim: Sim): ProjectEstimate {
+  const plant = sim.state.plant;
+  const problems: string[] = [];
+  if (!plant) problems.push("The mine has no preparation plant");
+  else if (plant.status !== "MOTHBALLED") problems.push(`${plant.name} is not mothballed`);
+  return { type: "PLANT_REFURBISH", length: 0, cost: PLANT.refurbish.cost, workMinutes: PLANT.refurbish.hours * 60, grade: null, earthworksM3: null, problems, warnings: [] };
+}
+
+export function planPlantRefurbish(sim: Sim): { project: ConstructionProject; estimate: ProjectEstimate } | { problems: string[] } {
+  const e = estimatePlantRefurbish(sim);
+  if (e.problems.length) return { problems: e.problems };
+  if (!sim.canAfford(e.cost)) return { problems: [`Not enough cash or credit for the refurbishment ($${e.cost.toLocaleString()})`] };
+  const plant = sim.state.plant!;
+  const p = project(sim, "PLANT_REFURBISH", `Refurbish ${plant.name.toLowerCase()}`, [{ x: plant.x, z: plant.z + plant.depth / 2 + 6 }], e);
+  sim.state.projects.push(p);
+  plant.status = "REFURBISHING";
+  return { project: p, estimate: e };
 }
 
 export { pathLength };

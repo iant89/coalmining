@@ -45,6 +45,8 @@ frames, not milliseconds, and uses `?quality=low`.
   for a foreman must pass it; player commands leave it null.
 - **A `serviceHold` pauses a machine's own task** while a lube or service truck works on it; it is
   released when that truck's task ends (`release` in `tasks/service.ts`).
+- **Sold coal is committed.** Anything that takes coal from a stockpile (the plant, a future
+  reclaimer) must leave `committedT(sim, pileId)` for the loadout.
 - **The morning meeting pauses only the UI**: tests and headless runs keep ticking with it pending.
 - Forge debug-line colours are `0xAARRGGBB`; alpha < 128 means emissive radiance.
 

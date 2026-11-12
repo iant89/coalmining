@@ -112,12 +112,16 @@ test("coal sales check the customer's quality spec and adjust price for quality"
   const q = quoteSale(sim, power, rom, 500);
   assert.equal(q.problems.length, 0);
   assert.ok(q.pricePerT < power.price, "ash above 10% is penalised");
-  const cash = sim.state.treasury.cash;
+  const revenue0 = sim.state.today.revenue;
   const r = sell(sim, power.id, rom.id, 500);
   assert.ok(r.ok);
-  assert.equal(rom.tonnes, 500);
-  const royalty = q.revenue * sim.state.parcels[0]!.royalty;
-  assert.ok(Math.abs(sim.state.treasury.cash - cash - (q.revenue - royalty)) < 0.01);
+  // The sale is loaded out at the loadout's rate and paid when the last truck leaves.
+  assert.equal(rom.tonnes, 1000);
+  assert.ok(quoteSale(sim, power, rom, 800).tonnes <= 500 + 1e-9, "sold coal is committed");
+  runUntil(ms, () => sim.state.loadout!.shipments.length === 0, 3 * 60);
+  assert.ok(Math.abs(rom.tonnes - 500) < 1e-6);
+  assert.ok(Math.abs(sim.state.today.revenue - revenue0 - q.revenue) < 0.01);
+  assert.equal(sim.state.today.coalSoldT, 500);
 });
 
 test("same seed and commands give the same mine (determinism)", () => {

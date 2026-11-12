@@ -70,14 +70,18 @@
     { "id": "fac-office", "type": "OFFICE", "name": "Mine office", "x": -26, "z": 150, "width": 16, "depth": 10, "height": 4.5, "rotation": 0 },
     { "id": "fac-shop", "type": "SHOP", "name": "Maintenance shop", "x": 18, "z": 162, "width": 26, "depth": 16, "height": 9, "rotation": 0 },
     { "id": "fac-fuel", "type": "FUEL", "name": "Fuel station", "x": 50, "z": 136, "width": 8, "depth": 5, "height": 4, "rotation": 0 },
-    { "id": "fac-parking", "type": "PARKING", "name": "Equipment yard", "x": -10, "z": 108, "width": 54, "depth": 26, "height": 0.2, "rotation": 0 }
+    { "id": "fac-parking", "type": "PARKING", "name": "Equipment yard", "x": -10, "z": 108, "width": 54, "depth": 26, "height": 0.2, "rotation": 0 },
+    { "id": "fac-loadout", "type": "LOADOUT", "name": "Truck loadout", "x": 178, "z": 166, "width": 10, "depth": 16, "height": 13, "rotation": 0 }
   ],
+  "plant": { "x": 152, "z": 150, "width": 24, "depth": 16, "feed": "rom-1", "clean": "clean-1", "refuse": "dump-refuse", "condition": 34, "mothballed": true },
   "dumps": [
     { "id": "dump-east", "name": "East spoil dump", "accepts": "SPOIL", "area": { "x0": 160, "z0": -150, "x1": 192, "z1": -4 }, "maxHeight": 14 },
-    { "id": "dump-topsoil", "name": "Topsoil stockpile", "accepts": "TOPSOIL", "area": { "x0": 172, "z0": 24, "x1": 192, "z1": 64 }, "maxHeight": 5 }
+    { "id": "dump-topsoil", "name": "Topsoil stockpile", "accepts": "TOPSOIL", "area": { "x0": 172, "z0": 24, "x1": 192, "z1": 64 }, "maxHeight": 5 },
+    { "id": "dump-refuse", "name": "Plant refuse pile", "accepts": "REFUSE", "area": { "x0": 116, "z0": 168, "x1": 144, "z1": 190 }, "maxHeight": 8 }
   ],
   "stockpiles": [
-    { "id": "rom-1", "name": "ROM coal stockpile", "x": 122, "z": 132, "materialType": "COAL_RAW", "capacityT": 12000 }
+    { "id": "rom-1", "name": "ROM coal stockpile", "x": 122, "z": 132, "materialType": "COAL_RAW", "capacityT": 12000 },
+    { "id": "clean-1", "name": "Clean coal stockpile", "x": 180, "z": 132, "materialType": "COAL_CLEAN", "capacityT": 8000 }
   ],
   "blocks": [
     { "id": "A1", "name": "Block A1", "area": { "x0": 120, "z0": -72, "x1": 152, "z1": -40 } },

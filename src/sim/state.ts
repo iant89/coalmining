@@ -170,7 +170,8 @@ export type TaskTarget =
   | { kind: "road"; id: string }
   | { kind: "project"; id: string }
   | { kind: "conveyor"; id: string }
-  | { kind: "hopper"; id: string };
+  | { kind: "hopper"; id: string }
+  | { kind: "plant"; id: string };
 
 export type ExcavateMode = "OVERBURDEN" | "COAL";
 
@@ -357,7 +358,7 @@ export interface DumpArea {
   id: string;
   name: string;
   rect: CellRect;
-  accepts: "SPOIL" | "TOPSOIL";
+  accepts: "SPOIL" | "TOPSOIL" | "REFUSE";
   /** Max placed height above the pre-mining surface. */
   maxHeight: number;
   /** Placed tonnes so far. */
@@ -379,7 +380,7 @@ export interface Stockpile {
 
 // ------------------------------------------------------------------ construction & conveyors
 
-export type ConstructionType = "HAUL_ROAD" | "CONVEYOR" | "STOCKPILE";
+export type ConstructionType = "HAUL_ROAD" | "CONVEYOR" | "STOCKPILE" | "PLANT_REFURBISH";
 export type ProjectStatus = "PLANNED" | "IN_PROGRESS" | "COMPLETE" | "CANCELLED";
 
 export interface ConstructionProject {
@@ -450,6 +451,84 @@ export interface Conveyor {
   startTimer: number;
   totalT: number;
   breakdown: { cause: string; minute: number } | null;
+}
+
+// ------------------------------------------------------------------ preparation plant & loadout (phase 09)
+
+export type PlantUnitKind = "FEEDER" | "CRUSHER" | "SCREEN" | "SEPARATOR";
+
+/** One stage of the circuit (spec §25): its capacity, power draw and wear. */
+export interface PlantUnit {
+  id: string;
+  kind: PlantUnitKind;
+  name: string;
+  capacityTph: number;
+  powerKw: number;
+  /** Condition lost per thousand tonnes through the unit. */
+  wearPerKt: number;
+  condition: number;
+  breakdown: { cause: string; minute: number } | null;
+  /** Lifetime tonnes through the unit. */
+  throughputT: number;
+}
+
+export type PlantStatus = "MOTHBALLED" | "REFURBISHING" | "OFF" | "STARTING" | "RUNNING" | "STOPPED" | "BROKEN";
+
+/**
+ * The preparation plant: FEEDER → CRUSHER → SCREEN → SEPARATOR → clean coal + refuse. Raw coal is
+ * reclaimed from a stockpile, washed at the cut density the player sets, and splits into a clean
+ * product (lower ash, sulfur; higher heat value) and refuse placed on the refuse pile.
+ */
+export interface PrepPlant {
+  id: string;
+  name: string;
+  x: number;
+  z: number;
+  width: number;
+  depth: number;
+  status: PlantStatus;
+  /** Why it is not running (STOPPED / BROKEN / OFF), as a sentence the player can act on. */
+  stopReason: string | null;
+  /** The player's on/off switch. */
+  enabled: boolean;
+  units: PlantUnit[];
+  feedStockpileId: string;
+  cleanStockpileId: string;
+  refuseDumpId: string;
+  /** Feed-rate setpoint, t/h. */
+  feedRateTph: number;
+  /** Dense-medium cut density, g/cm³: lower makes cleaner coal and less of it. */
+  cutDensity: number;
+  operatorId: string | null;
+  /** Minutes into the start-up sequence. */
+  startTimer: number;
+  /** Feed rate achieved over the last tick, t/h (0 when stopped). */
+  rateTph: number;
+  /** Quality of the clean coal last produced and the mass yield it came at. */
+  lastProduct: CoalQuality | null;
+  lastYield: number | null;
+  totalFeedT: number;
+  totalCleanT: number;
+  totalRefuseT: number;
+}
+
+/** A sale being loaded out to the customer's trucks or rail cars. */
+export interface Shipment {
+  id: string;
+  customerId: string;
+  stockpileId: string;
+  tonnes: number;
+  loadedT: number;
+  pricePerT: number;
+  royaltyRate: number;
+  createdMinute: number;
+}
+
+export interface Loadout {
+  facilityId: string;
+  rateTph: number;
+  /** First come, first loaded. */
+  shipments: Shipment[];
 }
 
 // ------------------------------------------------------------------ management (crews, foremen, meeting)
@@ -636,7 +715,7 @@ export interface Notification {
   severity: "info" | "good" | "warn" | "critical";
   title: string;
   text: string;
-  subject: { kind: "equipment" | "task" | "block" | "worker" | "stockpile"; id: string } | null;
+  subject: { kind: "equipment" | "task" | "block" | "worker" | "stockpile" | "plant"; id: string } | null;
 }
 
 export interface DayStats {
@@ -655,6 +734,9 @@ export interface DayStats {
   incidents: number;
   drilledM: number;
   blasts: number;
+  plantFeedT: number;
+  cleanCoalT: number;
+  refuseT: number;
 }
 
 export interface ShiftConfig {
@@ -690,6 +772,8 @@ export interface SimState {
   conveyors: Conveyor[];
   crews: Crew[];
   meeting: MorningMeeting | null;
+  plant: PrepPlant | null;
+  loadout: Loadout | null;
   equipment: EquipmentInstance[];
   workers: Employee[];
   candidates: Employee[];

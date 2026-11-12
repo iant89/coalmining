@@ -301,7 +301,7 @@ export function buildServiceTruck(scene: Scene, kit: ModelKit, name: string, col
  * supports, the belt (with a load strip the view scales with the material on it) and a drive head
  * over the discharge. Returns the belt-load part so the view can show what the belt carries.
  */
-export function buildConveyor(scene: Scene, kit: ModelKit, id: string, a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }): { root: Entity; load: Entity; parts: Entity[] } {
+export function buildConveyor(scene: Scene, kit: ModelKit, id: string, a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }, opts: { hopper?: boolean; rise?: number } = {}): { root: Entity; load: Entity; parts: Entity[] } {
   const root = placed(scene, `conveyor-${id}`, new Vec3(0, 0, 0));
   const parts: Entity[] = [];
   const dx = b.x - a.x;
@@ -310,7 +310,7 @@ export function buildConveyor(scene: Scene, kit: ModelKit, id: string, a: { x: n
   const yawA = Math.atan2(dx, dz);
   // The belt starts low at the hopper and rises to discharge over the pile.
   const y0 = a.y + 2.2;
-  const y1 = b.y + 9;
+  const y1 = b.y + (opts.rise ?? 9);
   const slope = Math.atan2(y1 - y0, len);
   const run = Math.hypot(len, y1 - y0);
   const mid = { x: (a.x + b.x) / 2, y: (y0 + y1) / 2, z: (a.z + b.z) / 2 };
@@ -332,12 +332,42 @@ export function buildConveyor(scene: Scene, kit: ModelKit, id: string, a: { x: n
     parts.push(part(scene, kit, root, `conveyor-${id}.leg${k}`, { pos: [x, gy + h / 2, z], size: [0.25, h, 0.25], color: 0x6a7076, metallic: 0.5 }));
   }
   // Hopper: a steel box on legs the trucks back up to.
-  parts.push(part(scene, kit, root, `conveyor-${id}.hopper`, { pos: [a.x, a.y + 3.2, a.z], size: [5.5, 2.6, 5.5], color: 0x8a6f3a, metallic: 0.4, roughness: 0.6, rot: [0, yawA, 0] }));
-  parts.push(part(scene, kit, root, `conveyor-${id}.hopperBase`, { pos: [a.x, a.y + 1, a.z], size: [3, 2, 3], color: 0x5c636a, rot: [0, yawA, 0] }));
+  if (opts.hopper !== false) parts.push(part(scene, kit, root, `conveyor-${id}.hopper`, { pos: [a.x, a.y + 3.2, a.z], size: [5.5, 2.6, 5.5], color: 0x8a6f3a, metallic: 0.4, roughness: 0.6, rot: [0, yawA, 0] }));
+  if (opts.hopper !== false) parts.push(part(scene, kit, root, `conveyor-${id}.hopperBase`, { pos: [a.x, a.y + 1, a.z], size: [3, 2, 3], color: 0x5c636a, rot: [0, yawA, 0] }));
   // Drive head over the discharge point.
   parts.push(part(scene, kit, root, `conveyor-${id}.head`, { pos: [b.x, y1 + 0.3, b.z], size: [2.4, 1.6, 2.4], color: 0x3e5f8a, rot: [0, yawA, 0] }));
   parts.push(part(scene, kit, root, `conveyor-${id}.tower`, { pos: [b.x, (b.y + y1) / 2, b.z], size: [0.4, y1 - b.y, 0.4], color: 0x6a7076, metallic: 0.5 }));
   return { root, load, parts };
+}
+
+/**
+ * The preparation plant: a clad wash building with the cyclones on the roof, a crusher tower at the
+ * feed end, the screen house, and a thickener tank beside it. Returns the root.
+ */
+export function buildPlant(scene: Scene, kit: ModelKit, p: { id: string; x: number; z: number; width: number; depth: number }, ground: number, mothballed: boolean): Entity {
+  const root = placed(scene, `plant-${p.id}`, new Vec3(p.x, ground, p.z));
+  const w = p.width;
+  const d = p.depth;
+  const clad = mothballed ? 0x8a6d55 : 0x8e9aa3;
+  const steel = 0x6d7178;
+  // Wash building.
+  part(scene, kit, root, "plant.wash", { pos: [w * 0.1, 8, 0], size: [w * 0.55, 16, d], color: clad, metallic: 0.3, roughness: 0.6 });
+  part(scene, kit, root, "plant.washRoof", { pos: [w * 0.1, 16.2, 0], size: [w * 0.57, 0.4, d + 0.4], color: 0x5d666e, metallic: 0.5 });
+  for (let n = 0; n < 3; n++) part(scene, kit, root, `plant.window${n}`, { pos: [w * 0.1 - w * 0.18 + n * w * 0.18, 11, d / 2 + 0.03], size: [w * 0.12, 1.2, 0.06], color: GLASS, roughness: 0.15, metallic: 0.3, shadow: false });
+  // Cyclones on the roof.
+  for (const z of [-d * 0.2, d * 0.2]) {
+    part(scene, kit, root, `plant.cyclone${z}`, { pos: [w * 0.18, 18.2, z], size: [1.6, 3.6, 1.6], color: 0xd9d4c4, geometry: "cylinder", metallic: 0.3 });
+    part(scene, kit, root, `plant.cycloneCone${z}`, { pos: [w * 0.18, 15.8, z], size: [0.8, 1.4, 0.8], color: 0xd9d4c4, geometry: "cone", rot: [Math.PI, 0, 0] });
+  }
+  // Crusher tower at the feed end, screen house between.
+  part(scene, kit, root, "plant.crusher", { pos: [-w * 0.36, 6, -d * 0.15], size: [w * 0.22, 12, d * 0.55], color: steel, metallic: 0.5, roughness: 0.5 });
+  part(scene, kit, root, "plant.crusherHead", { pos: [-w * 0.36, 12.6, -d * 0.15], size: [w * 0.18, 1.2, d * 0.4], color: 0xf2c014 });
+  part(scene, kit, root, "plant.screens", { pos: [-w * 0.18, 4.5, d * 0.22], size: [w * 0.16, 9, d * 0.45], color: clad, metallic: 0.3 });
+  // Thickener: a shallow round tank of grey water off the back.
+  part(scene, kit, root, "plant.thickener", { pos: [w * 0.15, 1.4, -d / 2 - 7], size: [11, 2.8, 11], color: 0x9aa3ab, geometry: "cylinder", metallic: 0.3 });
+  part(scene, kit, root, "plant.thickenerWater", { pos: [w * 0.15, 2.82, -d / 2 - 7], size: [10.4, 0.04, 10.4], color: 0x3f4a4f, geometry: "cylinder", roughness: 0.1, shadow: false });
+  part(scene, kit, root, "plant.slab", { pos: [0, 0.06, 0], size: [w + 4, 0.12, d + 4], color: 0x8b8680, roughness: 0.95, shadow: false });
+  return root;
 }
 
 export function buildFacility(scene: Scene, kit: ModelKit, f: { id: string; type: string; x: number; z: number; width: number; depth: number; height: number; rotation: number }, ground: number): Entity {
@@ -363,6 +393,16 @@ export function buildFacility(scene: Scene, kit: ModelKit, f: { id: string; type
       part(scene, kit, root, `${f.id}.canopy`, { pos: [0, 4.2, d / 2 + 1.5], size: [6, 0.25, 4], color: 0xeeeeee });
       for (const x of [-2.6, 2.6]) part(scene, kit, root, `${f.id}.post${x}`, { pos: [x, 2.1, d / 2 + 1.5], size: [0.2, 4.2, 0.2], color: 0x777777 });
       break;
+    case "LOADOUT": {
+      // A truck loadout: a coal silo on four legs over a drive-through bay.
+      const legH = 5;
+      for (const [x, z] of [[-w / 2 + 0.6, -d / 2 + 0.6], [w / 2 - 0.6, -d / 2 + 0.6], [-w / 2 + 0.6, d / 2 - 0.6], [w / 2 - 0.6, d / 2 - 0.6]] as const) part(scene, kit, root, `${f.id}.leg${x}${z}`, { pos: [x, legH / 2, z], size: [0.5, legH, 0.5], color: 0x6a7076, metallic: 0.5 });
+      part(scene, kit, root, `${f.id}.silo`, { pos: [0, legH + (h - legH) / 2, 0], size: [w * 0.9, h - legH, w * 0.9], color: 0xb8bcc0, geometry: "cylinder", metallic: 0.5, roughness: 0.4 });
+      part(scene, kit, root, `${f.id}.cone`, { pos: [0, legH - 0.2, 0], size: [w * 0.45, 1.6, w * 0.45], color: 0x8e949a, geometry: "cone", rot: [Math.PI, 0, 0], metallic: 0.5 });
+      part(scene, kit, root, `${f.id}.chute`, { pos: [0, legH - 1.6, 0], size: [0.8, 1.4, 0.8], color: 0x3e4248 });
+      part(scene, kit, root, `${f.id}.slab`, { pos: [0, 0.06, 0], size: [w + 2, 0.12, d + 6], color: 0x8b8680, roughness: 0.95, shadow: false });
+      break;
+    }
     case "PARKING":
       part(scene, kit, root, `${f.id}.slab`, { pos: [0, 0.06, 0], size: [w, 0.12, d], color: 0x8b8680, roughness: 0.95, shadow: false });
       break;

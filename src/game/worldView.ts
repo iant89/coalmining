@@ -7,7 +7,7 @@
 import { Vec3, type Engine, type Entity, type Scene } from "@forge/engine";
 import type { Sim } from "../sim/sim.js";
 import type { CellRect } from "../sim/world/terrain.js";
-import { buildConveyor, buildFacility, forgetRenderables, part, placed, renderableOf, type ModelKit } from "./models.js";
+import { buildConveyor, buildFacility, buildPlant, forgetRenderables, part, placed, renderableOf, type ModelKit } from "./models.js";
 import { alongPath } from "../sim/logistics/construction.js";
 import type { EquipmentView } from "./equipmentView.js";
 
@@ -43,6 +43,7 @@ export class WorldView {
   private stockpiles = new Map<string, { root: Entity; cone: Entity }>();
   private conveyors = new Map<string, { root: Entity; load: Entity; run: number }>();
   private facilities: Entity[] = [];
+  private plant: { root: Entity; belts: { load: Entity; root: Entity }[]; mothballed: boolean } | null = null;
   readonly lines = { blocks: true, holes: true, samples: true, routes: true, dumps: true };
 
   constructor(
@@ -120,6 +121,43 @@ export class WorldView {
       if (r) r.visible = vis;
       // Footprint marker so the empty pile is still findable.
       if (this.lines.dumps) this.circle(s.x, s.z, Math.max(10, R + 2), rgba(70, 70, 70), 24, 0.3);
+    }
+
+    // Preparation plant and its three belts (reclaim feed, clean product, refuse).
+    const p = sim.state.plant;
+    const mothballed = p?.status === "MOTHBALLED" || p?.status === "REFURBISHING";
+    if (p && (!this.plant || this.plant.mothballed !== mothballed)) {
+      if (this.plant) {
+        forgetRenderables(this.plant.root);
+        this.plant.root.destroy();
+        for (const b of this.plant.belts) {
+          forgetRenderables(b.root);
+          b.root.destroy();
+        }
+      }
+      const root = buildPlant(this.scene, this.kit, p, t.heightAt(p.x, p.z), mothballed);
+      const at = (x: number, z: number) => ({ x, y: t.heightAt(x, z), z });
+      const feed = sim.stockpile(p.feedStockpileId);
+      const clean = sim.stockpile(p.cleanStockpileId);
+      const dump = sim.dump(p.refuseDumpId);
+      const belts: { load: Entity; root: Entity }[] = [];
+      if (feed) belts.push(buildConveyor(this.scene, this.kit, "plant-feed", at(feed.x + 8, feed.z + 4), at(p.x - p.width / 2, p.z - 2), { rise: 12 }));
+      if (clean) belts.push(buildConveyor(this.scene, this.kit, "plant-clean", at(p.x + p.width / 2 - 2, p.z), at(clean.x, clean.z), { hopper: false, rise: 10 }));
+      if (dump) {
+        const cx = (t.cellX(dump.rect.i0) + t.cellX(dump.rect.i1)) / 2;
+        const cz = (t.cellZ(dump.rect.j0) + t.cellZ(dump.rect.j1)) / 2;
+        belts.push(buildConveyor(this.scene, this.kit, "plant-refuse", at(p.x - p.width * 0.2, p.z + p.depth / 2), at(cx, cz), { hopper: false, rise: 8 }));
+      }
+      this.plant = { root, belts, mothballed };
+    }
+    if (p && this.plant) {
+      const running = p.status === "RUNNING";
+      for (const b of this.plant.belts) {
+        const r = renderableOf(b.load);
+        if (r) r.visible = running;
+      }
+      const color = p.status === "RUNNING" ? rgba(110, 220, 120) : p.status === "BROKEN" ? rgba(255, 70, 60) : p.status === "STARTING" ? rgba(255, 200, 80) : rgba(150, 150, 150);
+      this.circle(p.x, p.z, Math.max(p.width, p.depth) * 0.75, color, 32, 0.4);
     }
 
     // Conveyors: built once when commissioned; the load strip shows what the belt is carrying.
@@ -225,6 +263,11 @@ export class WorldView {
   dispose(): void {
     for (const e of this.facilities) e.destroy();
     for (const e of this.stockpiles.values()) e.root.destroy();
+    if (this.plant) {
+      this.plant.root.destroy();
+      for (const b of this.plant.belts) b.root.destroy();
+      this.plant = null;
+    }
     for (const c of this.conveyors.values()) {
       forgetRenderables(c.root);
       c.root.destroy();

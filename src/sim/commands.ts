@@ -13,10 +13,11 @@ import { applyForRenewal } from "./regulatory/permits.js";
 import { revealGeology } from "./mining/exploration.js";
 import { setWeather } from "./environment/weather.js";
 import { forceBreakdown } from "./tasks/executors.js";
-import { generateCandidate, operatorProblem } from "./workforce/workforce.js";
-import { cancelProject, planConveyorProject, planRoadProject, planStockpileProject, type ProjectEstimate } from "./logistics/construction.js";
+import { generateCandidate, operatorProblem, roleLabel } from "./workforce/workforce.js";
+import { cancelProject, planPlantRefurbish, planConveyorProject, planRoadProject, planStockpileProject, type ProjectEstimate } from "./logistics/construction.js";
 import { conveyorById, hopperById, setConveyorEnabled } from "./logistics/conveyors.js";
-import type { ConstructionProject, Crew, CrewOrder, CrewOrderType } from "./state.js";
+import type { ConstructionProject, Crew, CrewOrder, CrewOrderType, PrepPlant } from "./state.js";
+import { PLANT } from "./processing/plant.js";
 import { BLOCK_ORDERS, crewById, newOrder, ORDER_LABEL } from "./management/crews.js";
 import { endMeeting, holdMeeting } from "./management/meeting.js";
 
@@ -189,6 +190,7 @@ export function dismissWorker(sim: Sim, workerId: string): CommandResult<undefin
   if (!w) return fail("Unknown employee");
   if (sim.state.tasks.some((t) => t.assignedWorkerId === w.id && !TERMINAL.has(t.status) && t.status !== "QUEUED")) return fail(`${w.name} is working a task; reassign it first`);
   w.employmentStatus = "TERMINATED";
+  if (sim.state.plant?.operatorId === w.id) sim.state.plant.operatorId = null;
   for (const c of sim.state.crews) {
     c.workerIds = c.workerIds.filter((id) => id !== w.id);
     if (c.foremanId === w.id) c.foremanId = null;
@@ -281,6 +283,71 @@ export function gradeRoad(sim: Sim, roadId: string, graderId?: string | null): C
   const r = sim.state.roadEdges.find((e) => e.id === roadId);
   if (!r) return fail("Unknown road");
   return assignTask(sim, { type: "GRADE_ROAD", equipmentId: graderId ?? null, destination: { kind: "road", id: r.id }, label: `Grade road ${r.a} → ${r.b}` });
+}
+
+// ---------------------------------------------------------------- preparation plant (phase 09)
+
+function plantOf(sim: Sim): CommandResult<PrepPlant> {
+  return sim.state.plant ? ok(sim.state.plant) : fail("The mine has no preparation plant");
+}
+
+/** Hire contractors to bring the mothballed plant back into service. */
+export function refurbishPlant(sim: Sim): CommandResult<ConstructionProject> {
+  const r = planPlantRefurbish(sim);
+  if ("problems" in r) return fail(r.problems.join("; "));
+  const t = assignTask(sim, { type: "CONSTRUCT", destination: { kind: "project", id: r.project.id }, label: r.project.name });
+  if (!t.ok) {
+    cancelProject(sim, r.project.id);
+    return t;
+  }
+  return ok(r.project);
+}
+
+export function setPlantEnabled(sim: Sim, on: boolean): CommandResult<undefined> {
+  const r = plantOf(sim);
+  if (!r.ok) return r;
+  const p = r.value;
+  if (on && (p.status === "MOTHBALLED" || p.status === "REFURBISHING")) return fail(`${p.name} is mothballed: refurbish it first`);
+  p.enabled = on;
+  return ok(undefined);
+}
+
+export function setPlantOperator(sim: Sim, workerId: string | null): CommandResult<undefined> {
+  const r = plantOf(sim);
+  if (!r.ok) return r;
+  if (workerId) {
+    const w = sim.worker(workerId);
+    if (!w || w.employmentStatus === "TERMINATED") return fail("Unknown employee");
+    if (w.role !== "PLANT_OPERATOR") return fail(`${w.name} is a ${roleLabel(w.role)}, not a plant operator`);
+  }
+  r.value.operatorId = workerId;
+  return ok(undefined);
+}
+
+/** Feed-rate setpoint (t/h) and cut density (g/cm³); out-of-range values are clamped. */
+export function setPlantSettings(sim: Sim, settings: { feedRateTph?: number; cutDensity?: number; feedStockpileId?: string; cleanStockpileId?: string }): CommandResult<undefined> {
+  const r = plantOf(sim);
+  if (!r.ok) return r;
+  const p = r.value;
+  if (settings.feedStockpileId !== undefined) {
+    const s = sim.stockpile(settings.feedStockpileId);
+    if (!s || s.materialType !== "COAL_RAW") return fail("The plant feeds from a raw coal stockpile");
+    p.feedStockpileId = s.id;
+  }
+  if (settings.cleanStockpileId !== undefined) {
+    const s = sim.stockpile(settings.cleanStockpileId);
+    if (!s || s.id === p.feedStockpileId) return fail("Choose a different stockpile for clean coal");
+    p.cleanStockpileId = s.id;
+  }
+  if (settings.feedRateTph !== undefined && Number.isFinite(settings.feedRateTph)) p.feedRateTph = Math.max(20, Math.min(400, settings.feedRateTph));
+  if (settings.cutDensity !== undefined && Number.isFinite(settings.cutDensity)) p.cutDensity = Math.max(PLANT.cutDensity.min, Math.min(PLANT.cutDensity.max, settings.cutDensity));
+  return ok(undefined);
+}
+
+export function repairPlantTask(sim: Sim): CommandResult<Task> {
+  const r = plantOf(sim);
+  if (!r.ok) return r;
+  return assignTask(sim, { type: "REPAIR", destination: { kind: "plant", id: r.value.id }, priority: "HIGH", label: `Repair ${r.value.name}` });
 }
 
 // ---------------------------------------------------------------- crews, foremen and the morning meeting

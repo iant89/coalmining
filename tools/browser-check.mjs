@@ -189,11 +189,17 @@ check(rom > 500, `coal reached the ROM stockpile (${Math.round(rom)} t)`);
 // Sell through the dialog.
 await page.locator("#tabs button", { hasText: "FINANCE" }).click();
 await page.locator("#drawer button", { hasText: "SELL COAL" }).click();
-const cashBefore = await g(() => window.blackCreek.game.ms.state.treasury.cash);
+const revenueBefore = await g(() => window.blackCreek.game.ms.state.today.revenue);
+await page.locator("#modal select[name=pile]").selectOption("rom-1");
 await page.locator("#modal button[data-id=cust-power]").click();
 await sleep(300);
-const cashAfter = await g(() => window.blackCreek.game.ms.state.treasury.cash);
-check(cashAfter > cashBefore + 10000, `selling coal to the power station brings in cash (${Math.round(cashAfter - cashBefore)})`);
+const shipped = await g(() => {
+  const { game } = window.blackCreek;
+  const queued = game.ms.state.loadout.shipments.length;
+  for (let n = 0; n < 12 * 60 * 12 && game.ms.state.loadout.shipments.length; n++) game.ms.tick();
+  return { queued, revenue: game.ms.state.today.revenue };
+});
+check(shipped.queued === 1 && shipped.revenue > revenueBefore + 10000, `selling coal to the power station loads out and is paid (${Math.round(shipped.revenue - revenueBefore)})`);
 await page.keyboard.press("Escape");
 await page.keyboard.press("Escape");
 
@@ -247,6 +253,74 @@ await page.keyboard.press("Escape");
   const st8 = await g(() => window.blackCreek.engine.stats());
   check(st8.gpuErrors === 0, `no GPU errors with conveyors and new roads (${st8.gpuErrors})`);
   await shot("6-logistics");
+}
+
+// Development phase 09: refurbish the preparation plant, staff it, wash coal and sell it clean.
+{
+  await page.locator("#tabs button", { hasText: "PLANT" }).click();
+  await frames(1);
+  await page.locator("#drawer button[data-act=plant-refurbish]").click();
+  const refurb = await g(() => {
+    const { game } = window.blackCreek;
+    const s = game.ms.state;
+    const status = s.plant.status;
+    for (let h = 0; h < 6 * 24 && s.plant.status === "REFURBISHING"; h++) game.ms.advanceMinutes(60);
+    return { status, after: s.plant.status };
+  });
+  check(refurb.status === "REFURBISHING" && refurb.after === "OFF", `REFURBISH THE PLANT brings it back into service (${JSON.stringify(refurb)})`);
+  await page.locator("#tabs button", { hasText: "WORKERS" }).click();
+  await page.locator("#drawer tr", { hasText: "Plant Operator" }).locator("button[data-act=hire]").first().click();
+  await page.locator("#tabs button", { hasText: "PLANT" }).click();
+  await frames(1);
+  const opId = await g(() => window.blackCreek.game.ms.state.workers.find((w) => w.role === "PLANT_OPERATOR")?.id);
+  await page.locator("#drawer select[data-plant-set=operator]").selectOption(opId);
+  await page.locator("#drawer input[data-plant-set=cut]").fill("1.5");
+  await page.locator("#drawer input[data-plant-set=cut]").dispatchEvent("change");
+  await page.locator("#drawer button[data-act=plant-toggle]").click();
+  const washed = await g(() => {
+    const { game } = window.blackCreek;
+    const s = game.ms.state;
+    const rom = s.stockpiles.find((x) => x.id === "rom-1");
+    // Raw coal for the plant (a debug top-up: the slice's own coal has been sold).
+    rom.tonnes = Math.max(rom.tonnes, 2500);
+    rom.quality ??= { ash: 15, sulfur: 1.5, moisture: 9, btu: 11900 };
+    // Run into the next day shift if needed.
+    for (let n = 0; n < 30 * 60 * 12 && s.stockpiles.find((x) => x.id === "clean-1").tonnes < 800; n++) game.ms.tick();
+    for (const u of s.plant.units) u.breakdown = null;
+    return { cut: s.plant.cutDensity, operator: s.plant.operatorId, enabled: s.plant.enabled, clean: s.stockpiles.find((x) => x.id === "clean-1").tonnes, ash: s.stockpiles.find((x) => x.id === "clean-1").quality?.ash, rawAsh: rom.quality?.ash };
+  });
+  check(washed.cut === 1.5 && washed.enabled && !!washed.operator, `plant controls set through the UI (${JSON.stringify({ cut: washed.cut, enabled: washed.enabled, operator: washed.operator })})`);
+  check(washed.clean >= 800 && washed.ash < washed.rawAsh - 3, `the plant washes raw coal into clean coal (${Math.round(washed.clean)} t at ${washed.ash?.toFixed(1)}% ash from ${washed.rawAsh?.toFixed(1)}%)`);
+  // Make sure it is running for the screenshot.
+  await g(() => {
+    const { game } = window.blackCreek;
+    const s = game.ms.state;
+    for (let n = 0; n < 24 * 60 * 12 && s.plant.status !== "RUNNING"; n++) game.ms.tick();
+    game.select(null);
+    game.rig.centerOn(s.plant.x - 5, s.plant.z - 10, 130);
+    game.rig.yaw = 2.6;
+  });
+  // The PLANT tab is still open from setting the controls.
+  await frames(4);
+  await shot("9-plant-tab");
+  await page.locator("#tabs button", { hasText: "PLANT" }).click();
+  await frames(8);
+  const plantStats = await g(() => window.blackCreek.engine.stats());
+  check(plantStats.gpuErrors === 0, `no GPU errors with the plant (${plantStats.gpuErrors})`);
+  await shot("8-plant");
+  await page.locator("#tabs button", { hasText: "FINANCE" }).click();
+  await page.locator("#drawer button", { hasText: "SELL COAL" }).click();
+  await page.locator("#modal select[name=pile]").selectOption("clean-1");
+  await page.locator("#modal input[name=t]").fill("500");
+  await page.locator("#modal input[name=t]").dispatchEvent("input");
+  const industrialRow = await page.locator("#modal tr", { hasText: "Valley Cement" }).textContent();
+  check(/SELL/.test(industrialRow ?? ""), `washed coal can be sold to the industrial buyer (${(industrialRow ?? "").slice(0, 120)})`);
+  await page.locator("#modal button[data-id=cust-industrial]").click();
+  await page.keyboard.press("Escape");
+  await page.locator("#tabs button", { hasText: "FINANCE" }).click();
+  // At game speed the 500 t may already be loaded: look for the agreed sale, not the queue.
+  const sold = await g(() => window.blackCreek.game.ms.state.notifications.filter((n) => /Valley Cement/.test(n.title) || /Valley Cement/.test(n.text)).map((n) => n.title));
+  check(sold.some((t) => /Sale agreed: 500 t/.test(t)), `the clean coal sale goes to the loadout (${sold.join(" | ")})`);
 }
 
 // Support trucks: the lube truck refuels the excavator where it stands.

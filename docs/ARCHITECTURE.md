@@ -41,7 +41,8 @@ minute tick means a minute of command latency and trucks jumping 750 m. Executor
 *budget* per tick across their phases, so cycle times do not depend on the tick length.
 
 **Pipeline** (`simulation.ts`, spec §5.1): store previous poses → advance clock → hourly weather and
-roads → blast-zone clearance → tasks (which drive equipment, mining and logistics) → per-minute
+roads → blast-zone clearance → tasks (which drive equipment, mining and logistics) → conveyors →
+preparation plant → loadout → per-minute
 safety, lab results and objectives → hourly ledger flush → end-of-day reports, market, permits.
 
 **Determinism.** All randomness is the seeded `Rng` in state; nothing reads the clock. Same seed +
@@ -102,6 +103,26 @@ Overlays, block estimates and drill designs use the estimate; digging uses the t
   graders to the worst road below the threshold (`automation.ts`, spec §11.2 MAINTAIN_ROAD).
 - **Coal routing**: `settings.coalDestination` points MINE COAL orders at a stockpile or a hopper.
   Coal is accounted exactly: a truck keeps any part-load a full hopper or stockpile cannot take.
+
+### Preparation plant and loadout (development phase 09)
+
+- **The plant** (`processing/plant.ts`, data in `src/data/plant.json`) runs at pipeline step 10, after
+  the conveyors. It is a chain of units (feeder, breaker, screen, dense-medium cyclone), each with a
+  capacity, power draw, wear per kilotonne and a breakdown hazard that rises as it wears. The
+  slowest unit sets the capacity; the cyclone's and screen's condition and the operator's skill set
+  the separation efficiency.
+- **Washability** (`wash`) is a pure function: raw coal is coal with inherent ash plus rock at 80 %
+  ash. A lower cut density rejects more rock and some of the dirtiest coal, so the product is cleaner
+  and smaller. Pyritic sulfur leaves with the rock. Mass, ash and sulfur balance exactly between
+  feed, product and refuse (tested), and the PLANT tab previews the result for the current setting.
+- The plant runs only when it is switched on, refurbished, unbroken, staffed by a plant operator on
+  shift, has feed and has room for the product; otherwise it stops with a reason. Refuse is placed on
+  the refuse pile like spoil, so the pile grows on the terrain. Breakdowns file a mechanic `REPAIR`
+  on a `{ kind: "plant" }` target.
+- **Loadout** (`economy/market.ts`): with a loadout, a sale becomes a `Shipment` loaded at the loadout's
+  rate, first come first served, and paid when loading ends. Coal sold and waiting is committed: it
+  cannot be sold twice or reclaimed by the plant. A pile that runs dry ships short and is paid for
+  what was loaded. Mines without a loadout (older saves) keep instant sales.
 
 ### Management: support trucks, foremen and the morning meeting
 

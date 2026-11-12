@@ -12,7 +12,7 @@ import { tickTasks } from "./tasks/service.js";
 import { blastClearance } from "./tasks/executors.js";
 import { minuteSafety } from "./regulatory/safety.js";
 import { dailyPermits } from "./regulatory/permits.js";
-import { dailyMarket } from "./economy/market.js";
+import { dailyMarket, tickLoadout } from "./economy/market.js";
 import { processLab } from "./mining/exploration.js";
 import { newDayWorkforce } from "./workforce/workforce.js";
 import { updateObjectives } from "./objectives.js";
@@ -20,6 +20,7 @@ import { autoDispatch, supportDispatch, wireAutomation } from "./automation.js";
 import { tickForemen } from "./management/crews.js";
 import { holdMeeting, isShiftStart } from "./management/meeting.js";
 import { tickConveyors } from "./logistics/conveyors.js";
+import { tickPlant } from "./processing/plant.js";
 
 export function emptyDay(day: number): DayStats {
   return {
@@ -38,6 +39,9 @@ export function emptyDay(day: number): DayStats {
     incidents: 0,
     drilledM: 0,
     blasts: 0,
+    plantFeedT: 0,
+    cleanCoalT: 0,
+    refuseT: 0,
   };
 }
 
@@ -76,6 +80,9 @@ export class MineSimulation {
     tickTasks(sim);
     // 09. Conveyors.
     tickConveyors(sim);
+    // 10–11. Preparation plant, loadout.
+    tickPlant(sim);
+    tickLoadout(sim);
     for (const e of sim.state.equipment) {
       if (e.state === "BROKEN") {
         e.stats.downMin += sim.dt;

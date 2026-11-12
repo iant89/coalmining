@@ -4,6 +4,8 @@
  * a particular mine is hard-coded in simulation code.
  */
 import { holdMeeting } from "./management/meeting.js";
+import { newPlant, PLANT } from "./processing/plant.js";
+import type { MaterialType } from "./world/materials.js";
 import { valueNoise, Rng } from "./core/rng.js";
 import { SimClock } from "./core/clock.js";
 import { Terrain, type CellRect } from "./world/terrain.js";
@@ -28,7 +30,7 @@ import { SLICE_OBJECTIVES } from "./objectives.js";
 import { generateCandidate } from "./workforce/workforce.js";
 import blackCreek from "../data/scenarios/black_creek.json" with { type: "json" };
 
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 
 interface WorldRect {
   x0: number;
@@ -79,7 +81,9 @@ export interface ScenarioDefinition {
   }[];
   roads: { nodes: { id: string; x: number; z: number }[]; edges: { a: string; b: string; speedLimitKmh: number; width: number; condition: number }[] };
   facilities: Facility[];
-  dumps: { id: string; name: string; accepts: "SPOIL" | "TOPSOIL"; area: WorldRect; maxHeight: number }[];
+  dumps: { id: string; name: string; accepts: "SPOIL" | "TOPSOIL" | "REFUSE"; area: WorldRect; maxHeight: number }[];
+  /** The preparation plant (spec §25), and whether it starts mothballed. */
+  plant?: { x: number; z: number; width: number; depth: number; feed: string; clean: string; refuse: string; condition: number; mothballed: boolean };
   stockpiles: { id: string; name: string; x: number; z: number; materialType: string; capacityT: number }[];
   blocks: { id: string; name: string; area: WorldRect }[];
   equipment: { defId: string; name: string; x: number; z: number; heading: number; condition: number; hours: number; hoursSinceService: number; fuelPct: number; operator: string | null }[];
@@ -195,12 +199,14 @@ export function loadScenario(def: ScenarioDefinition, catalog: Catalog, override
     roadEdges: def.roads.edges.map((e, i) => ({ id: `road-${i + 1}`, a: e.a, b: e.b, condition: e.condition, speedLimitKmh: e.speedLimitKmh, width: e.width, traffic: 0 })),
     facilities: def.facilities.map((f) => ({ ...f })),
     dumps: def.dumps.map((d) => ({ id: d.id, name: d.name, rect: toRect(terrain, d.area), accepts: d.accepts, maxHeight: d.maxHeight, tonnes: 0 })),
-    stockpiles: def.stockpiles.map((s) => ({ id: s.id, name: s.name, x: s.x, z: s.z, materialType: s.materialType as "COAL_RAW", capacityT: s.capacityT, tonnes: 0, quality: null, inT: 0, outT: 0 })),
+    stockpiles: def.stockpiles.map((s) => ({ id: s.id, name: s.name, x: s.x, z: s.z, materialType: s.materialType as MaterialType, capacityT: s.capacityT, tonnes: 0, quality: null, inT: 0, outT: 0 })),
     projects: [],
     hoppers: [],
     conveyors: [],
     crews: [],
     meeting: null,
+    plant: null,
+    loadout: null,
     equipment: [],
     workers: [],
     candidates: [],
@@ -337,10 +343,16 @@ export function loadScenario(def: ScenarioDefinition, catalog: Catalog, override
       tonnesAtMeeting: 0,
     });
   }
+  if (def.plant) {
+    const p = def.plant;
+    state.plant = newPlant(sim, p, p.feed, p.clean, p.refuse, p.condition, p.mothballed);
+  }
+  const loadoutFac = state.facilities.find((f) => f.type === "LOADOUT");
+  if (loadoutFac) state.loadout = { facilityId: loadoutFac.id, rateTph: PLANT.loadoutRateTph, shipments: [] };
   // Day 1 starts with the first meeting: the player hands the foremen their first orders.
   if (state.settings.morningMeeting) holdMeeting(sim);
 
-  for (let n = 0; n < 4; n++) state.candidates.push(generateCandidate(sim, n === 3 ? "BLASTER" : n === 2 ? "FOREMAN" : "OPERATOR"));
+  for (let n = 0; n < 4; n++) state.candidates.push(generateCandidate(sim, n === 3 ? "BLASTER" : n === 2 ? "FOREMAN" : n === 1 ? "PLANT_OPERATOR" : "OPERATOR"));
   sim.sync();
   state.rngState = sim.rng.state;
   sim.notify("info", `Welcome to ${def.mineName}`, def.description);

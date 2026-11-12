@@ -68,7 +68,7 @@ function ownWorker(sim: Sim, type: TaskType, target: TaskTarget | null | undefin
 
 /** A task that works on a conveyor rather than a machine. */
 function onConveyor(target: TaskTarget | null | undefined): boolean {
-  return target?.kind === "conveyor";
+  return target?.kind === "conveyor" || target?.kind === "plant";
 }
 
 /** Task types that need a named machine even without a category. */

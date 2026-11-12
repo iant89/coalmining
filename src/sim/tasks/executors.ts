@@ -16,6 +16,7 @@ import { CORE_COST_PER_M, recordCoreSample } from "../mining/exploration.js";
 import { addToStockpile, dumpPoint, placeInDump } from "../logistics/stockpiles.js";
 import { alongPath, workOnProject } from "../logistics/construction.js";
 import { addToHopper, conveyorById, finishConveyorRepair, hopperById, repairConveyorHours } from "../logistics/conveyors.js";
+import { finishPlantRepair, plantNeedsRepair, plantRepairHours } from "../processing/plant.js";
 import { haulClass, MATERIAL_LABEL, mergeParcel, surfaceMaterialIsRock } from "./helpers.js";
 import { mineralRightsProblem, permitProblem } from "../regulatory/permits.js";
 import { weatherEffects } from "../environment/weather.js";
@@ -83,6 +84,10 @@ export function targetPoint(sim: Sim, target: TaskTarget | null): { x: number; z
     case "project": {
       const p = sim.state.projects.find((x) => x.id === target.id);
       return p ? alongPath(p, p.progress) : null;
+    }
+    case "plant": {
+      const p = sim.state.plant;
+      return p ? { x: p.x, z: p.z + p.depth / 2 + 4 } : null;
     }
     case "conveyor": {
       const c = conveyorById(sim, target.id);
@@ -351,8 +356,31 @@ function repairConveyor(sim: Sim, t: Task, w: Employee | null, budget: number): 
   }
 }
 
+function repairPlant(sim: Sim, t: Task, w: Employee | null, budget: number): void {
+  const p = sim.state.plant;
+  if (!p) return failTask(sim, t, "The plant no longer exists");
+  if (!plantNeedsRepair(p) && t.phaseTimer === 0) return completeTask(sim, t);
+  t.status = "EXECUTING";
+  const skill = perf(w, "maintenance");
+  const total = 15 + plantRepairHours(p) * 60 * (1.3 - 0.5 * skill);
+  t.phaseTimer += budget;
+  t.note = t.phaseTimer < 15 ? "Mechanic walking to the plant" : `Repairing: ${p.units.filter((u) => u.breakdown).map((u) => u.breakdown!.cause).join("; ") || "overhaul of worn units"}`;
+  t.progress = Math.min(1, t.phaseTimer / total);
+  t.estimatedDuration = Math.max(0, total - t.phaseTimer);
+  if (t.phaseTimer >= total) {
+    finishPlantRepair(sim, p, skill);
+    completeTask(sim, t);
+  }
+}
+
 const REPAIR: TaskExecutor = {
   validate(sim, t) {
+    if (t.destination?.kind === "plant") {
+      const p = sim.state.plant;
+      if (!p) return ["The mine has no preparation plant"];
+      if (p.status === "MOTHBALLED" || p.status === "REFURBISHING") return [`${p.name} is mothballed: refurbish it instead`];
+      return plantNeedsRepair(p) ? [] : [`${p.name} does not need a repair`];
+    }
     if (t.destination?.kind === "conveyor") {
       const c = conveyorById(sim, t.destination.id);
       if (!c) return ["Unknown conveyor"];
@@ -369,6 +397,7 @@ const REPAIR: TaskExecutor = {
   },
   run(sim, t, eq, w, budget) {
     if (t.destination?.kind === "conveyor") return repairConveyor(sim, t, w, budget);
+    if (t.destination?.kind === "plant") return repairPlant(sim, t, w, budget);
     if (!eq) return;
     if (eq.state !== "BROKEN" && eq.condition > 0) return completeTask(sim, t);
     t.status = "EXECUTING";

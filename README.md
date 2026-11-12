@@ -72,6 +72,17 @@ URL options: `?new=1` ignores the autosave, `?seed=N` generates a different mine
 
 ![The morning meeting: the foreman's report and the crew's orders](docs/images/meeting.png)
 
+9. **Wash the coal.** Your grandfather's preparation plant is mothballed. *PLANT → REFURBISH*
+   (contractors, about $185k), hire a plant operator from the applicants and assign them, then
+   switch it on. It reclaims raw coal from the ROM pile through a feeder, breaker, desliming screen
+   and dense-medium cyclone into a clean coal stockpile, and sends the refuse up a belt to the
+   refuse pile. The **cut density** slider trades yield for quality, and the tab previews which
+   buyers the product will pass: washed coal from the A blocks makes the industrial spec; only
+   low-sulfur B-block coal washed hard makes premium. Sales go to the truck loadout (500 t/h) and
+   are paid when the last truck leaves.
+
+![The preparation plant: reclaim belt from the ROM pile, wash plant, clean coal and refuse belts](docs/images/plant.png)
+
 Everything can also be done by hand: select a machine and **ASSIGN TASK** (the dialog validates
 before assignment and explains every problem).
 
@@ -104,6 +115,7 @@ src/sim/        the simulation — authoritative, deterministic, no engine impor
   equipment/    data-driven catalog, movement, fuel/wear/breakdowns
   workforce/    shifts, fatigue, qualifications, payroll
   management/   crews, foremen and their orders, the morning meeting
+  processing/   preparation plant: washability, units, refurbishment
   logistics/    road network routing, dumps, stockpiles
   economy/ regulatory/ environment/   market, permits, safety, weather
   commands.ts   every player/developer action

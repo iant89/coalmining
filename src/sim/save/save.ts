@@ -123,6 +123,12 @@ const MIGRATIONS: Record<number, (state: Record<string, unknown>) => Record<stri
     const tasks = ((s.tasks ?? []) as Record<string, unknown>[]).map((t) => ({ crewId: null, ...t }));
     return { ...s, equipment, tasks, crews: s.crews ?? [], meeting: s.meeting ?? null, settings: { morningMeeting: true, ...settings } };
   },
+  // v4 (development phase 09): preparation plant and loadout (none in older mines: sales stay
+  // instant), plant statistics in the daily reports.
+  3: (s) => {
+    const day = (d: Record<string, unknown>) => ({ plantFeedT: 0, cleanCoalT: 0, refuseT: 0, ...d });
+    return { ...s, plant: s.plant ?? null, loadout: s.loadout ?? null, today: day((s.today ?? {}) as Record<string, unknown>), history: ((s.history ?? []) as Record<string, unknown>[]).map(day) };
+  },
 };
 
 export function migrate(state: Record<string, unknown>): SimState {

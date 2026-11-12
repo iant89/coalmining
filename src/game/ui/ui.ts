@@ -20,6 +20,7 @@ import { conditionBand, fuelFraction, payloadCapacity } from "../../sim/equipmen
 import { equipmentRisk, mineSafetyIndex } from "../../sim/regulatory/safety.js";
 import { certLabel, isOnShift, qualificationProblem, roleLabel, shiftLabel } from "../../sim/workforce/workforce.js";
 import { quoteSale } from "../../sim/economy/market.js";
+import type { CoalQuality } from "../../sim/world/materials.js";
 import { permitValid } from "../../sim/regulatory/permits.js";
 import { weatherEffects, roadConditionLabel } from "../../sim/environment/weather.js";
 import { MATERIAL_LABEL } from "../../sim/world/materials.js";
@@ -30,7 +31,10 @@ import { CONSTRUCTION, estimateConveyor, estimateRoad, estimateStockpile, snapRo
 import { hopperOf, transitMinutes } from "../../sim/logistics/conveyors.js";
 import { ROAD_MAINTENANCE_THRESHOLD } from "../../sim/automation.js";
 import { BLOCK_ORDERS, checkInterval, crewOfEquipment, crewOfWorker, crewTonnes, ORDER_LABEL, orderLabel } from "../../sim/management/crews.js";
-import type { Crew, CrewOrderType } from "../../sim/state.js";
+import type { Crew, CrewOrderType, PrepPlant } from "../../sim/state.js";
+import { PLANT, plantCapacityTph, plantEfficiency, plantNeedsRepair, plantPowerKw, wash } from "../../sim/processing/plant.js";
+import { committedT, qualityProblems } from "../../sim/economy/market.js";
+import { estimatePlantRefurbish } from "../../sim/logistics/construction.js";
 
 type Tab = "MINE" | "CREWS" | "EQUIPMENT" | "WORKERS" | "TASKS" | "LAND" | "PERMITS" | "FINANCE" | "PLANT" | "SAFETY" | "REPORTS" | "SETTINGS";
 const TABS: Tab[] = ["MINE", "CREWS", "EQUIPMENT", "WORKERS", "TASKS", "LAND", "PERMITS", "FINANCE", "PLANT", "SAFETY", "REPORTS", "SETTINGS"];
@@ -462,7 +466,7 @@ export class GameUI {
         break;
       }
       case "PLANT":
-        html = `<h2>Preparation plant</h2><p class="muted">Coal is sold raw (run of mine) from the stockpiles. Crusher, screens, separators and loadout are development phase 09. Conveyors and construction are in the MINE tab.</p>`;
+        html = this.plantHtml();
         break;
       case "SAFETY": {
         const rows = s.equipment.map((e) => ({ e, r: equipmentRisk(sim, e) })).sort((a, b) => b.r.score - a.r.score);
@@ -507,6 +511,72 @@ export class GameUI {
       }
     }
     morph(el, `<button class="close" data-act="tab" data-id="${this.tab}">✕</button>${html}`);
+  }
+
+  /** PLANT tab, development phase 09: the preparation plant flowsheet, its controls and the loadout. */
+  private plantHtml(): string {
+    const sim = this.sim;
+    const s = sim.state;
+    const p = s.plant;
+    if (!p) return `<h2>Preparation plant</h2><p class="muted">This mine has no preparation plant. Coal is sold raw from the stockpiles.</p>${this.loadoutHtml()}`;
+    const feed = sim.stockpile(p.feedStockpileId);
+    const clean = sim.stockpile(p.cleanStockpileId);
+    const dump = sim.dump(p.refuseDumpId);
+    const statusClass = p.status === "RUNNING" ? "good" : p.status === "STARTING" ? "warn" : p.status === "BROKEN" ? "bad" : "muted";
+    const head = `<h2>${esc(p.name)} <span class="status-chip ${statusClass}">${esc(label(p.status))}</span></h2>${p.stopReason && p.status !== "RUNNING" ? `<p class="${p.status === "BROKEN" ? "bad" : "muted"}">${esc(p.stopReason)}</p>` : ""}`;
+    if (p.status === "MOTHBALLED" || p.status === "REFURBISHING") {
+      const e = estimatePlantRefurbish(sim);
+      const proj = s.projects.find((x) => x.type === "PLANT_REFURBISH" && x.status !== "COMPLETE" && x.status !== "CANCELLED");
+      return `${head}<p>Your grandfather's wash plant: a reclaim feeder, rotary breaker, desliming screen and a dense-medium cyclone. Washing takes the rock out of the coal — lower ash and sulfur, more heat — and opens the industrial and premium buyers that will not take raw coal.</p>
+        ${proj ? `<p>Contractors at work: ${bar(proj.progress)} ${pct(proj.progress)} · ${money(proj.spent)} of ${money(proj.cost)} spent (they work the day shift).</p>` : `<div class="buttons"><button class="primary" data-act="plant-refurbish" ${e.problems.length || !sim.canAfford(e.cost) ? "disabled" : ""}>REFURBISH THE PLANT — ${money(e.cost)}, ~${Math.round(e.workMinutes / 60)} crew-hours</button></div>`}
+        ${this.loadoutHtml()}`;
+    }
+    const eff = plantEfficiency(sim, p);
+    const preview = feed?.quality ? wash(feed.quality, p.cutDensity, eff) : null;
+    const unitBox = (u: PrepPlant["units"][number]): string => `<div class="unit ${u.breakdown ? "broken" : ""}"><b>${esc(u.name)}</b><div class="muted">${esc(label(u.kind))} · ${u.capacityTph} t/h · ${u.powerKw} kW</div><div>${bar(u.condition / 100, conditionClass(u.condition))} ${u.condition.toFixed(0)}%</div>${u.breakdown ? `<div class="bad">${esc(u.breakdown.cause)}</div>` : ""}</div>`;
+    const arrow = `<div class="arrow">→</div>`;
+    const flow = `<div class="flowsheet">
+        <div class="unit pile"><b>Feed</b><div class="muted">${esc(feed?.name ?? "—")}</div><div>${tonnes(feed?.tonnes ?? 0)}</div>${feed?.quality ? `<div class="muted">ash ${feed.quality.ash.toFixed(1)}%</div>` : ""}</div>${arrow}
+        ${p.units.map(unitBox).join(arrow)}${arrow}
+        <div class="outs"><div class="unit pile good"><b>Clean coal</b><div class="muted">${esc(clean?.name ?? "—")}</div><div>${tonnes(clean?.tonnes ?? 0)} / ${tonnes(clean?.capacityT ?? 0)}</div>${clean?.quality ? `<div class="muted">ash ${clean.quality.ash.toFixed(1)}%</div>` : ""}</div>
+        <div class="unit pile"><b>Refuse</b><div class="muted">${esc(dump?.name ?? "—")}</div><div>${tonnes(dump?.tonnes ?? 0)}</div></div></div>
+      </div>`;
+    const operators = s.workers.filter((w) => w.role === "PLANT_OPERATOR" && w.employmentStatus !== "TERMINATED");
+    const op = sim.worker(p.operatorId);
+    const raw = s.stockpiles.filter((x) => x.materialType === "COAL_RAW");
+    const accepts = (q: CoalQuality | null): string => (q ? s.customers.map((c) => `<span class="chip ${qualityProblems(c, q).length ? "muted" : "good"}" title="${esc(qualityProblems(c, q).join("; ") || "Meets the spec")}">${esc(label(c.type))} ${qualityProblems(c, q).length ? "✗" : "✓"}</span>`).join(" ") : "");
+    const qline = (q: CoalQuality): string => `ash ${q.ash.toFixed(1)}% · S ${q.sulfur.toFixed(2)}% · ${Math.round(q.btu).toLocaleString()} BTU · moisture ${q.moisture.toFixed(1)}%`;
+    const t = s.today;
+    return `${head}${flow}
+      <div class="cols"><div>
+        <h3>Controls</h3>
+        <div class="buttons"><button class="${p.enabled ? "warn" : "primary"}" data-act="plant-toggle">${p.enabled ? "SWITCH OFF" : "SWITCH ON"}</button>${plantNeedsRepair(p) ? `<button class="warn" data-act="plant-repair">SEND A MECHANIC</button>` : ""}</div>
+        <table class="kv">
+          <tr><td>Operator</td><td><select data-plant-set="operator"><option value="">— none —</option>${operators.map((w) => `<option value="${w.id}" ${w.id === p.operatorId ? "selected" : ""}>${esc(w.name)}</option>`).join("")}</select>${operators.length ? "" : ` <span class="warn">hire a plant operator (WORKERS)</span>`}${op ? ` <span class="muted">${isOnShift(sim, op) ? "on shift" : "off shift"}</span>` : ""}</td></tr>
+          <tr><td>Feed from</td><td><select data-plant-set="feed">${raw.map((x) => `<option value="${x.id}" ${x.id === p.feedStockpileId ? "selected" : ""}>${esc(x.name)} (${tonnes(x.tonnes)})</option>`).join("")}</select></td></tr>
+          <tr><td>Feed rate</td><td><input type="number" data-plant-set="rate" min="20" max="400" step="10" value="${Math.round(p.feedRateTph)}"> t/h <span class="muted">plant capacity ${Math.round(plantCapacityTph(p))} t/h</span></td></tr>
+          <tr><td>Cut density</td><td><input type="range" data-plant-set="cut" min="${PLANT.cutDensity.min}" max="${PLANT.cutDensity.max}" step="0.05" value="${p.cutDensity}"> <b>${p.cutDensity.toFixed(2)}</b> g/cm³ <div class="muted">Lower: cleaner coal, less of it. Higher: more tonnes, more ash.</div></td></tr>
+          <tr><td>Separation</td><td>${pct(eff)} efficient <span class="muted">(cyclone and screen condition, operator skill)</span></td></tr>
+        </table>
+        ${preview ? `<h3>At this setting</h3><table class="kv"><tr><td>Yield</td><td>${pct(preview.yield)} clean coal, ${pct(1 - preview.yield)} refuse</td></tr><tr><td>Clean coal</td><td>${qline(preview.clean)}</td></tr><tr><td>Raw feed</td><td class="muted">${qline(feed!.quality!)}</td></tr><tr><td>Buyers</td><td>${accepts(preview.clean)} <div class="muted">raw: ${accepts(feed!.quality)}</div></td></tr></table>` : `<p class="muted">The feed stockpile is empty: no preview.</p>`}
+      </div><div>
+        <h3>Today</h3><table class="kv">
+          <tr><td>Running</td><td>${p.status === "RUNNING" ? `${Math.round(p.rateTph)} t/h · ${Math.round(plantPowerKw(p, p.rateTph / Math.max(1, plantCapacityTph(p))))} kW` : "—"}</td></tr>
+          <tr><td>Washed</td><td>${tonnes(t.plantFeedT)} raw → ${tonnes(t.cleanCoalT)} clean + ${tonnes(t.refuseT)} refuse${t.plantFeedT > 1 ? ` <span class="muted">(yield ${pct(t.cleanCoalT / t.plantFeedT)})</span>` : ""}</td></tr>
+          ${p.lastProduct ? `<tr><td>Last product</td><td>${qline(p.lastProduct)}</td></tr>` : ""}
+          <tr><td>Since start</td><td class="muted">${tonnes(p.totalFeedT)} washed · ${tonnes(p.totalCleanT)} clean · ${tonnes(p.totalRefuseT)} refuse</td></tr>
+          <tr><td>Costs</td><td class="muted">power $${CONSTRUCTION.electricityPerKWh.toFixed(2)}/kWh · magnetite &amp; reagents $${PLANT.reagentCostPerT.toFixed(2)}/t</td></tr>
+        </table>
+        ${this.loadoutHtml()}
+      </div></div>`;
+  }
+
+  private loadoutHtml(): string {
+    const sim = this.sim;
+    const lo = sim.state.loadout;
+    if (!lo) return "";
+    const rows = lo.shipments.map((sh, n) => `<tr><td>${n === 0 ? "loading" : "waiting"}</td><td>${esc(sim.customer(sh.customerId)?.name ?? "")}</td><td>${esc(sim.stockpile(sh.stockpileId)?.name ?? "")}</td><td>${bar(sh.loadedT / sh.tonnes)} ${tonnes(sh.loadedT)} / ${tonnes(sh.tonnes)}</td><td>$${sh.pricePerT.toFixed(2)}/t</td></tr>`).join("");
+    return `<h3>Loadout <span class="muted">${lo.rateTph} t/h, around the clock</span></h3><table class="grid small">${rows || `<tr><td class="muted">No shipments waiting. Sales (FINANCE → SELL COAL) are loaded here and paid when the last truck leaves.</td></tr>`}</table>`;
   }
 
   /** MINE tab, development phase 08: construction, coal routing, conveyors and haul roads. */
@@ -867,22 +937,31 @@ export class GameUI {
 
   private sellDialog(): void {
     const sim = this.sim;
-    const rom = sim.state.stockpiles[0];
-    if (!rom) return;
+    const piles = sim.state.stockpiles.filter((x) => x.materialType === "COAL_RAW" || x.materialType === "COAL_CLEAN");
+    if (!piles.length) return;
+    // Default to the fullest clean coal pile, else the first raw pile.
+    const best = piles.filter((x) => x.materialType === "COAL_CLEAN" && x.tonnes > 1).sort((a, b) => b.tonnes - a.tonnes)[0] ?? piles[0]!;
     const html = `
-      <h2>Sell coal — ${esc(rom.name)}</h2>
-      <p class="muted">${tonnes(rom.tonnes)} in stock${rom.quality ? ` · ash ${rom.quality.ash.toFixed(1)}% · sulfur ${rom.quality.sulfur.toFixed(2)}% · ${Math.round(rom.quality.btu).toLocaleString()} BTU/lb · moisture ${rom.quality.moisture.toFixed(1)}%` : ""}</p>
-      <div class="form"><label>Tonnes <input name="t" type="number" min="0" step="100" value="${Math.floor(rom.tonnes)}"></label></div>
+      <h2>Sell coal</h2>
+      <div class="form"><label>From <select name="pile">${piles.map((x) => `<option value="${x.id}" ${x === best ? "selected" : ""}>${esc(x.name)} (${tonnes(x.tonnes)})</option>`).join("")}</select></label>
+      <label>Tonnes <input name="t" type="number" min="0" step="100" value="${Math.floor(Math.max(0, best.tonnes - committedT(sim, best.id)))}"></label></div>
+      <p class="muted pile-info"></p>
       <div class="quotes"></div>
+      <p class="muted">${sim.state.loadout ? `Sales are loaded out at ${sim.state.loadout.rateTph} t/h and paid when loading finishes (PLANT tab shows the queue).` : "Sales are paid at once."}</p>
       <div class="buttons right"><button data-act="dlg-cancel">CLOSE</button></div>`;
     const refresh = (root: HTMLElement): void => {
       const t = Number((root.querySelector("[name=t]") as HTMLInputElement).value) || 0;
-      root.querySelector(".quotes")!.innerHTML = `<table class="grid"><tr><th>Customer</th><th>Price</th><th>Adjustments</th><th>Takes</th><th>Revenue</th><th></th></tr>${sim.state.customers
+      const rom = sim.stockpile((root.querySelector("[name=pile]") as HTMLSelectElement).value) ?? best;
+      this.sellPile = rom.id;
+      const free = Math.max(0, rom.tonnes - committedT(sim, rom.id));
+      morph(root.querySelector(".pile-info")!, `${tonnes(rom.tonnes)} in ${esc(rom.name)}${free < rom.tonnes - 1 ? ` (${tonnes(free)} not yet sold)` : ""}${rom.quality ? ` · ash ${rom.quality.ash.toFixed(1)}% · sulfur ${rom.quality.sulfur.toFixed(2)}% · ${Math.round(rom.quality.btu).toLocaleString()} BTU/lb · moisture ${rom.quality.moisture.toFixed(1)}%` : ""}`);
+      // Patched, not replaced: the input's change event fires on the mousedown that clicks SELL.
+      morph(root.querySelector(".quotes")!, `<table class="grid"><tr><th>Customer</th><th>Price</th><th>Adjustments</th><th>Takes</th><th>Revenue</th><th></th></tr>${sim.state.customers
         .map((c) => {
           const q = quoteSale(sim, c, rom, t);
           return `<tr><td>${esc(c.name)}<div class="muted">${esc(label(c.type))}</div></td><td>$${q.pricePerT.toFixed(2)}/t</td><td class="muted">${q.adjustments.map((a) => `${esc(a.label)} ${a.perT >= 0 ? "+" : ""}${a.perT.toFixed(2)}`).join("<br>") || "—"}</td><td>${tonnes(q.tonnes)}</td><td>${money(q.revenue)}<div class="muted">royalty ${money(q.royalty)}</div></td><td>${q.problems.length ? `<span class="bad">${q.problems.map(esc).join("<br>")}</span>` : `<button class="primary" data-act="dlg-sell" data-id="${c.id}">SELL</button>`}</td></tr>`;
         })
-        .join("")}</table>`;
+        .join("")}</table>`);
     };
     const root = this.openDialog(html, refresh);
     this.dialogActions = {};
@@ -891,6 +970,7 @@ export class GameUI {
   }
 
   private sellRoot: HTMLElement | null = null;
+  private sellPile: string | null = null;
   private sellRefresh: ((root: HTMLElement) => void) | null = null;
 
   private operatorDialog(eq: EquipmentInstance): void {
@@ -997,6 +1077,18 @@ export class GameUI {
         break;
       case "tab":
         this.tab = this.tab === id ? null : (id as Tab);
+        break;
+      case "plant-refurbish":
+        fail(cmd.refurbishPlant(sim));
+        break;
+      case "plant-toggle":
+        fail(cmd.setPlantEnabled(sim, !sim.state.plant?.enabled));
+        break;
+      case "plant-repair":
+        fail(cmd.repairPlantTask(sim));
+        break;
+      case "select-plant":
+        this.tab = "PLANT";
         break;
       case "meeting-start":
         this.endMeetingDialog();
@@ -1165,7 +1257,7 @@ export class GameUI {
         return;
       case "dlg-sell": {
         const t = Number((this.sellRoot?.querySelector("[name=t]") as HTMLInputElement | null)?.value) || 0;
-        fail(cmd.sell(sim, id, sim.state.stockpiles[0]!.id, t));
+        fail(cmd.sell(sim, id, this.sellPile ?? sim.state.stockpiles[0]!.id, t));
         if (this.sellRoot && this.sellRefresh) this.sellRefresh(this.sellRoot);
         return;
       }
@@ -1230,6 +1322,18 @@ export class GameUI {
   bindSettings(): void {
     document.addEventListener("change", (e) => {
       const sel = e.target as HTMLSelectElement;
+      if (sel.dataset?.plantSet) {
+        const v = sel.value;
+        const k = sel.dataset.plantSet;
+        const r =
+          k === "operator" ? cmd.setPlantOperator(this.sim, v || null)
+          : k === "feed" ? cmd.setPlantSettings(this.sim, { feedStockpileId: v })
+          : k === "rate" ? cmd.setPlantSettings(this.sim, { feedRateTph: Number(v) })
+          : cmd.setPlantSettings(this.sim, { cutDensity: Number(v) });
+        if (!r.ok) this.sim.notify("warn", "Can't do that", r.error);
+        sel.blur();
+        return;
+      }
       if (sel.dataset?.crewAddEq || sel.dataset?.crewAddWorker) {
         if (!sel.value) return;
         const crew = (sel.dataset.crewAddEq ?? sel.dataset.crewAddWorker)!;

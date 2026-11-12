@@ -15,7 +15,7 @@ system exists at the depth the first vertical slice needs; the spec's later dept
 | 06 | Task architecture, queue, dependencies, assignment, dispatch, AI | **Done** — full lifecycle, validation with reasons, prerequisites, priorities, Role/Equipment/Movement AI layers, production-objective orders |
 | 07 | Benches, blasting, overburden, coal exposure, extraction | **Done (slice)** — mining blocks with states, pattern design, abstract blast design (fragmentation, vibration/airblast/flyrock, coal damage), exclusion-zone clearance, top-down excavation, coal recovery |
 | 08 | Haul roads, stockpiles, conveyors, routing | **Done (slice)** — data-driven construction projects (`src/data/construction.json`) built through tasks: haul roads built by a dozer that grades the alignment and joins the road graph; truck hoppers + overland conveyors (plug-flow belt, rated capacity, start-up, jams on a full stockpile, power cost, wear, breakdowns, mechanic repairs); player-built stockpiles; graders and an automatic road-maintenance objective; coal routing to a stockpile or hopper. Water trucks / dust not started (they belong with phase 14's dust) |
-| 09 | Preparation plant | Not started — raw coal is sold from the ROM stockpile |
+| 09 | Preparation plant | **Done (slice)** — a mothballed plant refurbished by contractors; feeder → crusher → screen → dense-medium separator as data-driven units (capacity, power, wear, breakdowns, mechanic repairs); two-component washability with a player-set cut density (yield vs ash, sulfur and heat value, mass/ash/sulfur balanced); a plant operator on shift; clean coal stockpile and a refuse pile that grows on the terrain; power and reagent costs; a truck loadout that ships sales at its rate and pays when loading ends. Thermal drying, fines circuits and blending are not modelled |
 | 10 | Economy | **Partial** — treasury, ledger, daily reports, payroll, fuel, maintenance, explosives, royalties, overhead, three customers with quality specs and drifting prices. Contracts and loans not started |
 | 11 | Land | **Partial** — one leased parcel with royalty, mineral-rights checks. Negotiation/acquisition not started |
 | 12 | Permits | **Partial** — permits gate tasks by type and area, expire, and renew. Applications for new areas and reclamation bonds not started |
@@ -41,7 +41,7 @@ system exists at the depth the first vertical slice needs; the spec's later dept
 - [x] Haul material
 - [x] Build a haul road
 - [x] Build a conveyor
-- [ ] Process coal (raw coal only)
+- [x] Process coal
 - [x] Sell coal
 - [x] Buy equipment
 - [x] Upgrade equipment
@@ -59,17 +59,19 @@ system exists at the depth the first vertical slice needs; the spec's later dept
 
 ## Next steps, in the spec's priority order (§71)
 
-1. Phase 09, preparation plant (§25): feeder → crusher → screen → separator fed by a conveyor, clean
-   coal and refuse, recovery and power; the conveyor network already delivers to any stockpile.
+1. Phase 10, economy: contracts with delivery schedules and quality bonuses (the loadout already
+   ships against a customer), loans, weekly and monthly reports.
 2. Simulation tiers (§58) once fleets grow: statistical simulation for distant/off-screen machines.
 3. Player-placed dumps and pit ramps (construction is data-driven; these are new project types).
-4. Economy: contracts with delivery schedules, loans.
-5. Regulation: inspector agent, rule-driven violations, fines, corrective actions.
-6. Reclamation: backfill, grade, topsoil, seed — topsoil salvage is already tracked.
-7. Campaign chapters 2–10 on the objective system.
+4. Regulation: inspector agent, rule-driven violations, fines, corrective actions.
+5. Reclamation: backfill, grade, topsoil, seed — topsoil salvage is already tracked; refuse
+   needs covering too.
+6. Campaign chapters 2–10 on the objective system.
 
 ## Known limitations
 
+- One preparation plant per mine, at a fixed site; no new plant can be built yet, and clean coal is
+  one product (no blending to a customer's spec).
 - Foremen do not yet plan blocks themselves (which block next) or ask to hire; the player gives
   every order. Crews share the support trucks, which are dispatched mine-wide.
 - Haul roads are straight segments between two points; curves are built from several roads.

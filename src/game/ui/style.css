@@ -169,3 +169,15 @@ body.debug #dev.open { display: block; position: fixed; left: 8px; top: 74px; wi
 .crew .add-order select { max-width: 240px; }
 .nowrap { white-space: nowrap; }
 label.toggle.inline { display: inline-flex; margin-right: auto; }
+
+/* Preparation plant flowsheet */
+.flowsheet { display: flex; align-items: stretch; gap: 4px; overflow-x: auto; padding: 6px 0 10px; }
+.flowsheet .unit { flex: 1 1 0; min-width: 118px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font-size: 12px; }
+.flowsheet .unit.broken { border-color: var(--bad); }
+.flowsheet .unit.pile { min-width: 100px; }
+.flowsheet .unit.pile.good { border-color: var(--good); }
+.flowsheet .arrow { align-self: center; color: var(--muted, #8a8f98); }
+.flowsheet .outs { display: flex; flex-direction: column; gap: 4px; flex: 1 1 0; min-width: 118px; }
+.status-chip { font-size: 12px; border: 1px solid currentColor; border-radius: 10px; padding: 1px 8px; margin-left: 6px; vertical-align: middle; }
+input[type=range][data-plant-set] { width: 160px; vertical-align: middle; }
+input[type=number][data-plant-set] { width: 70px; }

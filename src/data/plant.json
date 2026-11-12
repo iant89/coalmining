@@ -1,0 +1,26 @@
+{
+  "units": [
+    { "kind": "FEEDER", "name": "Reclaim feeder", "capacityTph": 320, "powerKw": 45, "wearPerKt": 0.18 },
+    { "kind": "CRUSHER", "name": "Rotary breaker", "capacityTph": 300, "powerKw": 220, "wearPerKt": 0.45 },
+    { "kind": "SCREEN", "name": "Desliming screen", "capacityTph": 300, "powerKw": 60, "wearPerKt": 0.3 },
+    { "kind": "SEPARATOR", "name": "Dense-medium cyclone", "capacityTph": 260, "powerKw": 180, "wearPerKt": 0.35 }
+  ],
+  "startMinutes": 15,
+  "reagentCostPerT": 1.1,
+  "cutDensity": { "min": 1.35, "max": 1.9, "default": 1.55 },
+  "rockAsh": 80,
+  "inherentAshFraction": 0.6,
+  "pyriticSulfurFraction": 0.35,
+  "productMoistureAdd": 1.5,
+  "refuseMoisture": 12,
+  "refurbish": { "cost": 185000, "hours": 30, "condition": 85 },
+  "repairHours": 4,
+  "repairCostPerUnit": 6500,
+  "breakdownCauses": {
+    "FEEDER": ["Feeder belt torn", "Feeder drive gearbox failed"],
+    "CRUSHER": ["Breaker liner plates worn through", "Crusher motor tripped and burned out"],
+    "SCREEN": ["Screen deck panels blinded and torn", "Screen exciter bearing seized"],
+    "SEPARATOR": ["Cyclone apex worn out", "Magnetite pump impeller failed"]
+  },
+  "loadoutRateTph": 500
+}
